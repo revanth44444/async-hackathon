@@ -1,7 +1,7 @@
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -11,14 +11,15 @@ from app.db import get_db
 from app.deps import client_id
 from app.engine.calculator import calculate, complete_structure
 from app.engine.flags import RedFlagReport, red_flags
-from app.engine.insights import Suggestion, suggestions
+from app.engine.insights import Projection, Suggestion, project, suggestions
 from app.engine.schemas import Assumptions, CalculationResult, SalaryStructure
 from app.models import Offer
 from app.services.cleanup import record_activity
 from app.services.explain import answer_question, explain_offer
 from app.services.extraction import _annualise_esop, extract_structure, location_defaults
 from app.services.negotiate import NegotiationEmail, NegotiationPoint, negotiation_email, negotiation_points
-from app.services.pdf import PDFError, extract_text
+from app.services.payslip import PayslipCheck, compare_payslip, read_payslip
+from app.services.pdf import PDFError, UnsupportedFile, extract_text, read_document
 
 router = APIRouter(prefix="/api/offers", tags=["offers"])
 
@@ -47,6 +48,7 @@ class OfferDetail(OfferSummary):
     suggestions: list[Suggestion]
     red_flags: RedFlagReport
     negotiation_points: list[NegotiationPoint]
+    projection: Projection
     has_raw_text: bool
 
 
@@ -113,6 +115,7 @@ def _detail(o: Offer) -> OfferDetail:
         suggestions=tips,
         red_flags=report,
         negotiation_points=negotiation_points(CalculationResult(**o.result), report, tips),
+        projection=project(s, a),
         has_raw_text=bool(o.raw_text),
     )
 
@@ -202,17 +205,20 @@ async def upload_offer(
     if len(data) > settings.max_upload_mb * 1024 * 1024:
         raise HTTPException(413, f"File too large (max {settings.max_upload_mb} MB)")
     name = file.filename or "offer"
-    if name.lower().endswith((".txt", ".md")):
-        text = data.decode("utf-8", errors="ignore")
-    elif data[:4] == b"%PDF":
-        try:
-            text = extract_text(data)
-        except PDFError as exc:
-            raise HTTPException(422, str(exc)) from exc
-    else:
-        raise HTTPException(415, "Upload a PDF or .txt offer letter")
-    # The PDF bytes are only held in memory for this request; just the extracted text is stored
-    return _detail(_create_from_text(db, owner, text, "pdf", label, name))
+    try:
+        text, used_ocr = read_document(data, name)
+    except UnsupportedFile as exc:
+        raise HTTPException(415, str(exc)) from exc
+    except PDFError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if not text.strip():
+        raise HTTPException(422, "We couldn't read any text in this file. Try a clearer scan, or paste the text.")
+    # The file bytes are only held in memory for this request; just the extracted text is stored
+    o = _create_from_text(db, owner, text, "pdf", label, name)
+    if used_ocr:
+        o.extraction_meta = {**(o.extraction_meta or {}), "ocr": True}
+        db.commit()
+    return _detail(o)
 
 
 @router.post("/text", response_model=OfferDetail, status_code=201)
@@ -311,3 +317,37 @@ def draft_negotiation_email(offer_id: str, body: NegotiationRequest, owner: str 
     chosen = [p for p in detail.negotiation_points if p.key in body.points] if body.points else detail.negotiation_points
     name = body.candidate_name or (o.extraction_meta or {}).get("candidate_name")
     return negotiation_email(detail.result, chosen, body.goal, name)
+
+
+@router.get("/{offer_id}/projection", response_model=Projection)
+def projection(offer_id: str, hike: float = Query(8, ge=0, le=50), owner: str = Depends(client_id), db: Session = Depends(get_db)):
+    o = _get(db, offer_id, owner)
+    return project(SalaryStructure(**o.structure), Assumptions(**o.assumptions), hike)
+
+
+@router.post("/{offer_id}/payslip", response_model=PayslipCheck)
+async def check_payslip(
+    offer_id: str,
+    file: UploadFile | None = File(None),
+    text: str | None = Form(None),
+    owner: str = Depends(client_id),
+    db: Session = Depends(get_db),
+):
+    """Compare a payslip with the offer. The payslip is read in memory and never stored."""
+    o = _get(db, offer_id, owner)
+    if file is not None:
+        data = await file.read()
+        if len(data) > settings.max_upload_mb * 1024 * 1024:
+            raise HTTPException(413, f"File too large (max {settings.max_upload_mb} MB)")
+        try:
+            content, _ = read_document(data, file.filename or "payslip")
+        except UnsupportedFile as exc:
+            raise HTTPException(415, str(exc)) from exc
+        except PDFError as exc:
+            raise HTTPException(422, str(exc)) from exc
+    elif text and len(text.strip()) >= 20:
+        content = text
+    else:
+        raise HTTPException(422, "Upload your payslip or paste its text")
+    parsed, method = read_payslip(content)
+    return compare_payslip(CalculationResult(**o.result), parsed, method)

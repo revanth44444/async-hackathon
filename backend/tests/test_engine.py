@@ -177,14 +177,28 @@ def test_ctc_and_gross_without_breakup_splits_the_stated_gross():
     s, est = complete_structure(SalaryStructure(ctc=1_200_000, variable_pay=120_000), stated_gross=81_000)
     fixed = s.basic + s.hra + s.special_allowance
     assert fixed == 972_000 and s.basic == 388_800
-    assert s.employer_pf == 46_656 and s.gratuity == round(388_800 * 0.0481)
-    assert s.insurance == 1_080_000 - 972_000 - 46_656 - s.gratuity  # the rest of the CTC is benefits
+    assert s.employer_pf == 21_600 and s.gratuity == round(388_800 * 0.0481)  # PF at the ₹1,800/month cap
+    assert s.insurance == 1_080_000 - 972_000 - 21_600 - s.gratuity  # the rest of the CTC is benefits
     assert [e["kind"] for e in est] == ["gross"] and "gross salary" in est[0]["message"]
     r = calculate(s)
     assert r.warnings == []
-    assert round(r.monthly_in_hand) == round((972_000 - 46_656 - r.professional_tax) / 12)
+    assert round(r.monthly_in_hand) == round((972_000 - 21_600 - r.professional_tax) / 12)
 
 
 def test_implausible_gross_above_ctc_falls_back_to_ctc_split():
     s, est = complete_structure(SalaryStructure(ctc=1_200_000), stated_gross=1_500_000)
     assert [e["kind"] for e in est] == ["split"]
+
+
+
+def test_unstated_pf_defaults_to_the_statutory_cap():
+    # CTC only, high enough that 12% of basic would exceed ₹1,800 a month
+    s, _ = complete_structure(SalaryStructure(ctc=2_000_000))
+    assert s.employer_pf == 21_600
+    assert round(s.basic + s.hra + s.special_allowance + s.employer_pf + s.gratuity) == 2_000_000
+    # Small CTC: 12% of basic is under the cap, so it stays 12%
+    s, _ = complete_structure(SalaryStructure(ctc=300_000))
+    assert s.employer_pf == round(0.12 * s.basic) < 21_600
+    # A breakup without a PF line: employee PF uses the cap too
+    r = calculate(SalaryStructure(ctc=1_500_000, basic=600_000, hra=300_000, special_allowance=600_000))
+    assert r.employee_pf == 21_600

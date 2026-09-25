@@ -45,10 +45,13 @@ def test_full_flow():
         assert c.get(f"/api/offers/{b['id']}").status_code == 404
 
 
-def test_rejects_non_pdf():
+def test_rejects_unsupported_and_unreadable_files():
     with TestClient(app, headers=ME) as c:
-        r = c.post("/api/offers/upload", files={"file": ("x.png", b"\x89PNG....", "image/png")})
+        r = c.post("/api/offers/upload", files={"file": ("x.docx", b"PK\x03\x04....", "application/octet-stream")})
         assert r.status_code == 415
+        # Images are supported (read by OCR), but without AI they can't be read, and the message says what to do
+        r = c.post("/api/offers/upload", files={"file": ("x.png", b"\x89PNG\r\n\x1a\n....", "image/png")})
+        assert r.status_code == 422 and "paste the text" in r.json()["detail"].lower()
 
 
 def test_cleanup_after_n_activities(monkeypatch):
@@ -264,4 +267,53 @@ def test_letter_with_ctc_and_monthly_gross_uses_the_gross():
         s = d["structure"]
         assert s["basic"] + s["hra"] + s["special_allowance"] == 972_000
         assert d["extraction_meta"]["estimated_split"] is True
-        assert d["result"]["monthly_in_hand"] < 81_000 - 3_888 + 1
+        assert d["result"]["monthly_in_hand"] < 81_000 - 1_800 + 1
+
+
+def test_three_year_projection_places_one_time_pay_in_the_right_year():
+    with TestClient(app, headers=ME) as c:
+        d = c.post("/api/offers/text", json={"text": ORBITRA}).json()
+        p = d["projection"]
+        assert [y["year"] for y in p["years"]] == [1, 2, 3] and p["hike_pct"] == 8
+        y1, y2, y3 = p["years"]
+        assert y1["one_time"] == 0 and y2["one_time_labels"] == ["Retention bonus"]  # paid at month 18
+        assert 0 < y2["one_time"] < 100_000  # after tax
+        assert y1["take_home"] < y2["take_home"] < y3["take_home"]
+        assert p["gratuity_at_5_years"] > 0
+        flat = c.get(f"/api/offers/{d['id']}/projection", params={"hike": 0}).json()
+        assert flat["years"][0]["take_home"] == flat["years"][2]["take_home"]
+
+
+PAYSLIP_OK = """Kestrel Retail Pvt Ltd - Payslip for May 2026
+Paid days: 31
+Earnings | Amount | Deductions | Amount
+Basic 32,000 | Provident Fund 1,800
+House Rent Allowance 16,000 | Professional Tax 200
+Special Allowance 21,461 | Income Tax 0
+Meal Coupons 2,200
+Gross Earnings 71,661
+Net Pay 69,661"""
+
+
+def test_payslip_matching_the_offer_passes_and_shortfalls_are_flagged():
+    with TestClient(app, headers=ME) as c:
+        d = c.post("/api/offers/text", json={"text": KESTREL}).json()
+        ok = c.post(f"/api/offers/{d['id']}/payslip", data={"text": PAYSLIP_OK}).json()
+        assert ok["method"] == "heuristic" and ok["verdict"] == "Your payslip matches the offer.", ok
+        bad = PAYSLIP_OK.replace("House Rent Allowance 16,000 | ", "").replace("Provident Fund 1,800", "Provident Fund 3,840")
+        res = c.post(f"/api/offers/{d['id']}/payslip", data={"text": bad}).json()
+        status = {x["label"]: x["status"] for x in res["lines"]}
+        assert status["House rent allowance"] == "missing" and status["Employee PF"] == "higher"
+        assert any("HRA is missing" in f for f in res["findings"]) and any("₹2,040" in f for f in res["findings"])
+        assert c.post(f"/api/offers/{d['id']}/payslip", data={"text": "hi"}).status_code == 422
+
+
+def test_payslip_recognises_hra_moved_into_special_allowance():
+    moved = PAYSLIP_OK.replace("House Rent Allowance 16,000 | ", "").replace("Special Allowance 21,461", "Special Allowance 37,461")
+    with TestClient(app, headers=ME) as c:
+        d = c.post("/api/offers/text", json={"text": KESTREL}).json()
+        res = c.post(f"/api/offers/{d['id']}/payslip", data={"text": moved}).json()
+        status = {x["label"]: x["status"] for x in res["lines"]}
+        assert status["House rent allowance"] == "moved" and status["Special allowance"] == "moved"
+        assert res["verdict"] != "" and "below what the offer promised" not in res["verdict"]
+        assert any("moved into special allowance" in f for f in res["findings"])

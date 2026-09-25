@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     groq_model: str = "openai/gpt-oss-120b"
     groq_fallback_model: str = "openai/gpt-oss-20b"  # used when the main model is rate limited
+    groq_vision_model: str = "qwen/qwen3.8-27b"  # reads scanned letters, photos and payslip images
     cors_origins: str = "http://localhost:3000"
     cors_origin_regex: str | None = None  # e.g. https://offerlens.*\.vercel\.app
     max_upload_mb: int = 10

@@ -1,7 +1,9 @@
 """Simulations, deterministic tax-saving suggestions and offer comparison."""
+import math
+
 from pydantic import BaseModel
 
-from app.engine.calculator import calculate, inr
+from app.engine.calculator import PF_CAP_ANNUAL, calculate, inr
 from app.engine.flags import RedFlagReport
 from app.engine.schemas import Assumptions, CalculationResult, SalaryStructure
 
@@ -116,6 +118,7 @@ class CompareRow(BaseModel):
     label: str
     result: CalculationResult
     red_flags: RedFlagReport | None = None
+    three_year_cash: float | None = None  # cash over 3 years with the default raise, one-time pay included
 
 
 class CompareResult(BaseModel):
@@ -183,4 +186,72 @@ def compare_metrics(rows: list[CompareRow]) -> CompareResult:
         best_retirement=best("Most retirement savings (PF + NPS)", lambda r: r.employee_pf + r.structure.employer_pf + r.structure.employer_nps),
         lowest_tax=best("Lowest income tax", lambda r: r.regimes[r.selected_regime].tax.total_tax, lowest=True),
         ties=ties,
+    )
+
+
+class YearRow(BaseModel):
+    year: int
+    monthly_in_hand: float
+    take_home: float  # recurring cash after tax, with variable pay at the assumed payout
+    one_time: float  # joining / retention bonus paid in this year, after tax
+    one_time_labels: list[str]
+    equity: float  # ESOP / RSU value vesting this year (not cash)
+    cash_total: float  # take_home + one_time
+
+
+class Projection(BaseModel):
+    hike_pct: float
+    years: list[YearRow]
+    cash_total: float
+    equity_total: float
+    gratuity_at_5_years: float  # paid only if you complete 5 years
+    notes: list[str]
+
+
+def project(s: SalaryStructure, a: Assumptions, hike_pct: float = 8.0, years: int = 3) -> Projection:
+    """Year-by-year cash with a yearly raise compounding on the recurring pay. One-time items land in the year
+    they are paid: the joining bonus in year 1, a retention bonus in the year its waiting period ends."""
+    h = hike_pct / 100
+    retention_year = math.ceil(s.retention_after_months / 12) if s.retention_after_months > 0 else None
+    rows: list[YearRow] = []
+    for y in range(1, years + 1):
+        grown = apply_hike(s, ((1 + h) ** (y - 1) - 1) * 100)
+        if abs(s.employer_pf - PF_CAP_ANNUAL) < 1:  # PF at the statutory cap stays there as pay grows
+            grown = grown.model_copy(update={"employer_pf": s.employer_pf})
+        joining = s.joining_bonus if y == 1 else 0.0
+        retention = s.retention_bonus if retention_year == y else 0.0
+        # year_one_take_home adds the joining bonus after its marginal tax, so reuse it for any year's one-time pay
+        r = calculate(grown.model_copy(update={"joining_bonus": joining + retention, "retention_bonus": 0,
+                                               "retention_after_months": 0}), a)
+        one_time = r.year_one_take_home - r.annual_take_home
+        labels = (["Joining bonus"] if joining else []) + (["Retention bonus"] if retention else [])
+        rows.append(YearRow(
+            year=y,
+            monthly_in_hand=r.monthly_in_hand,
+            take_home=r.annual_take_home,
+            one_time=round(one_time, 2),
+            one_time_labels=labels,
+            equity=s.esop_value,
+            cash_total=round(r.annual_take_home + one_time, 2),
+        ))
+    notes = [f"Assumes a raise of {hike_pct:g}% every year on fixed and variable pay."]
+    if s.variable_pay > 0:
+        notes.append(f"Variable pay is counted at {a.variable_payout_pct:g}% payout every year.")
+    if s.retention_bonus > 0 and retention_year is None:
+        notes.append("The letter doesn't say when the retention bonus is paid, so it isn't shown in any year.")
+    elif retention_year and retention_year > years:
+        notes.append(f"The retention bonus is paid in year {retention_year}, after this view.")
+    if s.esop_value > 0:
+        notes.append("ESOP / RSU value is the letter's figure. It isn't cash, and what it's worth depends on the company.")
+    basic_y5 = s.basic * (1 + h) ** 4
+    gratuity = round(15 / 26 * basic_y5 / 12 * 5) if s.basic > 0 else 0.0
+    if gratuity:
+        notes.append("Gratuity is 15 days' basic for each year served, paid only if you stay 5 years.")
+    return Projection(
+        hike_pct=hike_pct,
+        years=rows,
+        cash_total=round(sum(x.cash_total for x in rows), 2),
+        equity_total=round(sum(x.equity for x in rows), 2),
+        gratuity_at_5_years=gratuity,
+        notes=notes,
     )

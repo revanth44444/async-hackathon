@@ -8,7 +8,7 @@ from app.deps import client_id
 from app.engine import tax as rules
 from app.engine.calculator import calculate
 from app.engine.flags import red_flags
-from app.engine.insights import CompareResult, CompareRow, SimulationResult, compare_metrics, simulate
+from app.engine.insights import CompareResult, CompareRow, SimulationResult, compare_metrics, project, simulate
 from app.engine.schemas import Assumptions, CalculationResult, SalaryStructure
 from app.models import Offer
 from app.services.cleanup import record_activity
@@ -82,7 +82,8 @@ def compare(body: CompareRequest, owner: str = Depends(client_id), db: Session =
         r = calculate(SalaryStructure(**o.structure), a)
         meta = o.extraction_meta or {}
         report = red_flags(r, o.raw_text or "", meta.get("notes"), bool(meta.get("estimated_split")))
-        rows.append(CompareRow(offer_id=o.id, label=o.label, result=r, red_flags=report))
+        rows.append(CompareRow(offer_id=o.id, label=o.label, result=r, red_flags=report,
+                               three_year_cash=project(SalaryStructure(**o.structure), a).cash_total))
     if len(rows) < 2:
         raise HTTPException(422, "Pick at least two different offers")
     result = compare_metrics(rows)

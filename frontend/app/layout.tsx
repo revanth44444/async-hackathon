@@ -29,10 +29,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${inter.variable} ${bodoni.variable} h-full`}>
       <body className="flex min-h-full flex-col">
-        <div className="bg-accent py-2 text-center text-[10px] uppercase tracking-[0.24em] text-white/80">
+        <div className="bg-accent py-2 text-center print:hidden text-[10px] uppercase tracking-[0.24em] text-white/80">
           Salary estimates for FY 2025–26 · Indian income-tax rules
         </div>
-        <header className="sticky top-0 z-30 border-b border-line/70 bg-bg/80 backdrop-blur-xl">
+        <header className="sticky top-0 z-30 print:hidden border-b border-line/70 bg-bg/80 backdrop-blur-xl">
           <div className="wrap flex h-16 items-center gap-5 sm:gap-10">
             <Link href="/" className="serif text-[15px] uppercase tracking-[0.24em] text-ink sm:text-[19px] sm:tracking-[0.32em]">
               OfferLens
@@ -51,7 +51,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           </div>
         </header>
         <main className="flex-1">{children}</main>
-        <footer className="mt-24 border-t border-line">
+        <footer className="mt-24 border-t border-line print:hidden">
           <div className="wrap flex flex-col items-start justify-between gap-6 py-12 sm:flex-row sm:items-end">
             <div>
               <p className="serif text-lg uppercase tracking-[0.32em]">OfferLens</p>

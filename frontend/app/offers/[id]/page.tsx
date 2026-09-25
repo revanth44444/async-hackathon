@@ -11,11 +11,13 @@ import {
   Explanation,
   LetterNotes,
   Negotiation,
+  PayslipCheck,
   RedFlags,
   RegimeGuide,
   RegimePanel,
   StatRow,
   Suggestions,
+  ThreeYear,
   Warnings,
 } from "@/components/OfferSections";
 import { Simulator } from "@/components/Simulator";
@@ -59,6 +61,9 @@ export default function OfferPage() {
               ← All offers
             </Link>
             <div className="flex items-center gap-8">
+              <Link href={`/offers/${offer.id}/summary?print=1`} target="_blank" className="link-cta text-white/70">
+                Save as PDF
+              </Link>
               <Link href={`/compare?ids=${offer.id}`} className="link-cta text-white/70">
                 Compare
               </Link>
@@ -82,7 +87,8 @@ export default function OfferPage() {
               </p>
               <p className="mt-4 text-white/55">a month, in hand, out of a {lakh(r.structure.ctc)} CTC.</p>
               <p className="mt-2 text-xs text-white/35">
-                Only this browser can see this offer.{offer.filename ? " The original PDF was not stored." : ""}
+                Only this browser can see this offer.{offer.filename ? " The original file was not stored." : ""}
+                {offer.extraction_meta.ocr ? " Read from a scan or photo, so check the figures below." : ""}
               </p>
             </div>
             {(st.joining_bonus > 0 || retentionInYearOne) && (
@@ -116,6 +122,8 @@ export default function OfferPage() {
 
         <Simulator key={`sim-${version}`} offer={offer} onSaved={setOffer} />
 
+        <ThreeYear key={`3y-${version}`} offerId={offer.id} initial={offer.projection} />
+
         <section className="grid gap-16 lg:grid-cols-[1.15fr_1fr]">
           <BreakdownEditor key={`bd-${version}`} offer={offer} onSaved={setOffer} />
           <div className="space-y-16">
@@ -133,6 +141,8 @@ export default function OfferPage() {
             defaultName={offer.extraction_meta.candidate_name}
           />
         </section>
+
+        <PayslipCheck offerId={offer.id} />
 
         <section className="grid gap-16 lg:grid-cols-2">
           <Explanation key={`ex-${version}`} offerId={offer.id} initial={offer.explanation} />

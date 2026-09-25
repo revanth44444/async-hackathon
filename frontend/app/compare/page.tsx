@@ -141,6 +141,20 @@ function CompareInner() {
                     </tr>
                   );
                 })}
+                {data.rows.every((r) => r.three_year_cash !== null) && (() => {
+                  const vals = data.rows.map((r) => r.three_year_cash!);
+                  const top = Math.max(...vals);
+                  return (
+                    <tr className="border-t border-line">
+                      <td className="py-4 pr-4 text-muted">Cash over 3 years (8% raises)</td>
+                      {vals.map((v, i) => (
+                        <td key={data.rows[i].offer_id} className={`tabular py-4 text-right ${v === top && new Set(vals).size > 1 ? "text-good" : ""}`}>
+                          {inr(v)}
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })()}
                 {data.rows.every((r) => r.red_flags) && (() => {
                   const scores = data.rows.map((r) => r.red_flags!.score);
                   const top = Math.max(...scores);

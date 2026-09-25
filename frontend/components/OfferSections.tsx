@@ -10,6 +10,8 @@ import {
   type NegotiationPoint,
   type NumericField,
   type OfferDetail,
+  type PayslipCheck as PayslipResult,
+  type Projection,
   type RedFlagReport,
   type Regime,
   type SalaryStructure,
@@ -691,6 +693,248 @@ export function Negotiation({ offerId, points, defaultName }: { offerId: string;
             {email.method === "template" ? "Template draft. AI is currently unavailable." : "Written by AI from the points above."} Read it
             before sending.
           </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Three years of cash with a yearly raise; one-time pay lands in the year it's paid. */
+export function ThreeYear({ offerId, initial }: { offerId: string; initial: Projection }) {
+  const [hike, setHike] = useState(initial.hike_pct);
+  const [data, setData] = useState(initial);
+  const [busy, setBusy] = useState(false);
+
+  async function change(v: number) {
+    setHike(v);
+    setBusy(true);
+    try {
+      setData(await api.projection(offerId, v));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      <SectionHead
+        eyebrow="Three years out"
+        title="Beyond year one"
+        sub="Your cash each year with a yearly raise. One-time bonuses land in the year they're paid."
+      />
+      <label className="flex items-center gap-5 text-sm text-muted">
+        <span className="w-32 shrink-0">Yearly raise {hike}%</span>
+        <input
+          type="range"
+          min={0}
+          max={20}
+          step={1}
+          value={hike}
+          onChange={(e) => setHike(Number(e.target.value))}
+          onMouseUp={(e) => change(Number((e.target as HTMLInputElement).value))}
+          onTouchEnd={(e) => change(Number((e.target as HTMLInputElement).value))}
+          onKeyUp={(e) => change(Number((e.target as HTMLInputElement).value))}
+          className="flex-1 accent-[var(--accent)]"
+          aria-label="Yearly raise"
+        />
+      </label>
+      <div className={`mt-8 overflow-x-auto transition ${busy ? "opacity-50" : ""}`}>
+        <table className="w-full min-w-[520px] text-[15px]">
+          <thead>
+            <tr className="text-left">
+              <th className="eyebrow pb-3" />
+              {data.years.map((y) => (
+                <th key={y.year} className="eyebrow pb-3 text-right">
+                  Year {y.year}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            <tr className="border-t border-line">
+              <td className="py-3 text-muted">Monthly in hand</td>
+              {data.years.map((y) => (
+                <td key={y.year} className="tabular py-3 text-right">
+                  {inr(y.monthly_in_hand)}
+                </td>
+              ))}
+            </tr>
+            <tr className="border-t border-line">
+              <td className="py-3 text-muted">Take-home for the year</td>
+              {data.years.map((y) => (
+                <td key={y.year} className="tabular py-3 text-right">
+                  {inr(y.take_home)}
+                </td>
+              ))}
+            </tr>
+            <tr className="border-t border-line align-top">
+              <td className="py-3 text-muted">One-time bonuses, after tax</td>
+              {data.years.map((y) => (
+                <td key={y.year} className="tabular py-3 text-right">
+                  {y.one_time > 0 ? (
+                    <>
+                      {inr(y.one_time)}
+                      <span className="block text-xs text-muted">{y.one_time_labels.join(", ")}</span>
+                    </>
+                  ) : (
+                    <span className="text-muted">—</span>
+                  )}
+                </td>
+              ))}
+            </tr>
+            {data.equity_total > 0 && (
+              <tr className="border-t border-line">
+                <td className="py-3 text-muted">ESOPs / RSUs vesting (not cash)</td>
+                {data.years.map((y) => (
+                  <td key={y.year} className="tabular py-3 text-right text-muted">
+                    {inr(y.equity)}
+                  </td>
+                ))}
+              </tr>
+            )}
+            <tr className="border-t border-ink">
+              <td className="serif py-3 text-lg">Cash in the year</td>
+              {data.years.map((y) => (
+                <td key={y.year} className="tabular py-3 text-right text-lg">
+                  {inr(y.cash_total)}
+                </td>
+              ))}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-6 text-[15px]">
+        <span className="tabular">{inr(data.cash_total)}</span> in cash over three years
+        {data.gratuity_at_5_years > 0 && (
+          <span className="text-muted">
+            {" "}
+            · gratuity worth about <span className="tabular">{inr(data.gratuity_at_5_years)}</span> if you stay five years
+          </span>
+        )}
+      </p>
+      <ul className="mt-3 space-y-1 text-xs text-muted">
+        {data.notes.map((n) => (
+          <li key={n}>{n}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+const PAYSLIP_STATUS: Record<string, { label: string; tone: string }> = {
+  match: { label: "Matches", tone: "text-good" },
+  higher: { label: "Higher", tone: "text-ink" },
+  extra: { label: "Extra", tone: "text-ink" },
+  lower: { label: "Lower", tone: "text-bad" },
+  missing: { label: "Missing", tone: "text-bad" },
+  moved: { label: "Moved", tone: "text-muted" },
+  info: { label: "", tone: "text-muted" },
+};
+
+/** After joining: upload the first payslip and compare it line by line with what the offer promised. */
+export function PayslipCheck({ offerId }: { offerId: string }) {
+  const [result, setResult] = useState<PayslipResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pasting, setPasting] = useState(false);
+  const [text, setText] = useState("");
+
+  async function check(input: File | string) {
+    setBusy(true);
+    setError(null);
+    try {
+      setResult(await api.checkPayslip(offerId, input));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't check the payslip");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      <SectionHead
+        eyebrow="After you join"
+        title="Check your first payslip"
+        sub="Upload it and we'll compare every line with this offer. Your payslip is read once and never stored."
+      />
+      <div className="flex flex-wrap items-center gap-6">
+        <label className={`btn-primary cursor-pointer ${busy ? "pointer-events-none opacity-40" : ""}`}>
+          {busy && <Loader2 size={14} className="animate-spin" />}
+          {busy ? "Checking your payslip" : "Upload payslip"}
+          <input
+            type="file"
+            className="hidden"
+            accept=".pdf,.txt,.jpg,.jpeg,.png,.webp,application/pdf,text/plain,image/jpeg,image/png,image/webp"
+            aria-label="Upload your payslip"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) check(f);
+              e.target.value = "";
+            }}
+          />
+        </label>
+        <button className="link-cta" onClick={() => setPasting((p) => !p)}>
+          {pasting ? "Hide text box" : "Or paste the text"}
+        </button>
+      </div>
+      {pasting && (
+        <div className="mt-5 space-y-3">
+          <textarea
+            className="input-box min-h-[140px] text-sm"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            aria-label="Payslip text"
+            placeholder={"Basic 40,000 | Provident Fund 1,800\nHouse Rent Allowance 20,000 | Professional Tax 200\nNet Pay 85,925"}
+          />
+          <button className="btn-primary" disabled={busy || text.trim().length < 20} onClick={() => check(text)}>
+            Check payslip
+          </button>
+        </div>
+      )}
+      {error && <p className="mt-4 text-sm text-bad">{error}</p>}
+      {result && (
+        <div className="mt-8">
+          <p className="serif text-xl">{result.verdict}</p>
+          {result.month && <p className="mt-1 text-xs text-muted">Payslip for {result.month}</p>}
+          {result.lines.length > 0 && (
+            <div className="mt-6 overflow-x-auto">
+              <table className="w-full min-w-[520px] text-[15px]">
+                <thead>
+                  <tr className="text-left">
+                    <th className="eyebrow pb-3" />
+                    <th className="eyebrow pb-3 text-right">Offer</th>
+                    <th className="eyebrow pb-3 text-right">Payslip</th>
+                    <th className="eyebrow pb-3 text-right" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.lines.map((l) => (
+                    <tr key={l.label} className="border-t border-line">
+                      <td className="py-3 pr-2">{l.label}</td>
+                      <td className="tabular py-3 text-right text-muted">{l.expected !== null ? inr(l.expected) : "—"}</td>
+                      <td className="tabular py-3 text-right">{l.actual !== null ? inr(l.actual) : "—"}</td>
+                      <td className={`py-3 pl-4 text-right text-[10px] uppercase tracking-[0.18em] ${PAYSLIP_STATUS[l.status].tone}`}>
+                        {PAYSLIP_STATUS[l.status].label}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {result.findings.length > 0 && (
+            <ul className="mt-6 space-y-2">
+              {result.findings.map((f) => (
+                <li key={f} className="border-l border-line pl-4 text-sm text-ink/80">
+                  {f}
+                </li>
+              ))}
+            </ul>
+          )}
+          {result.one_time.length > 0 && (
+            <p className="mt-4 text-xs text-muted">Left out of the comparison as one-time or variable pay: {result.one_time.join(" · ")}</p>
+          )}
         </div>
       )}
     </div>

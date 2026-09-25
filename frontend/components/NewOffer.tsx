@@ -48,8 +48,8 @@ export function NewOffer() {
 
   function onFile(file: File | undefined) {
     if (!file) return;
-    if (!/\.(pdf|txt)$/i.test(file.name)) {
-      setError("Please upload a PDF or .txt file");
+    if (!/\.(pdf|txt|jpe?g|png|webp)$/i.test(file.name)) {
+      setError("Please upload a PDF, a photo (JPG or PNG) or a .txt file");
       return;
     }
     if (file.size > 4 * 1024 * 1024) {
@@ -124,12 +124,13 @@ export function NewOffer() {
             )}
             <p className="serif mt-6 text-2xl">{busy ? "Reading your offer" : "Drop your offer letter"}</p>
             <p className="mt-2 text-sm text-muted">
-              {busy ? "Extracting the structure and calculating your pay" : "PDF or text file · or click to browse"}
+              {busy ? "Extracting the structure and calculating your pay" : "PDF, scan or photo · or click to browse"}
             </p>
             <input
               ref={fileRef}
               type="file"
-              accept=".pdf,.txt,application/pdf,text/plain"
+              accept=".pdf,.txt,.jpg,.jpeg,.png,.webp,application/pdf,text/plain,image/jpeg,image/png,image/webp"
+              aria-label="Upload your offer letter"
               className="hidden"
               onChange={(e) => onFile(e.target.files?.[0])}
             />
@@ -142,6 +143,7 @@ export function NewOffer() {
               value={text}
               onChange={(e) => setText(e.target.value)}
               rows={10}
+              aria-label="Offer letter text"
               placeholder={"Paste the compensation section of your offer letter.\n\nBasic Salary: ₹60,000 per month\nHRA: ₹30,000 per month\n…"}
               className="input-box resize-none leading-relaxed"
             />

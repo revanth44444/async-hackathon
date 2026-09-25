@@ -143,6 +143,44 @@ export interface NegotiationPoint {
   why: string;
 }
 
+export interface YearRow {
+  year: number;
+  monthly_in_hand: number;
+  take_home: number;
+  one_time: number;
+  one_time_labels: string[];
+  equity: number;
+  cash_total: number;
+}
+
+export interface Projection {
+  hike_pct: number;
+  years: YearRow[];
+  cash_total: number;
+  equity_total: number;
+  gratuity_at_5_years: number;
+  notes: string[];
+}
+
+export interface PayslipLine {
+  label: string;
+  expected: number | null;
+  actual: number | null;
+  difference: number | null;
+  status: "match" | "higher" | "lower" | "missing" | "extra" | "moved" | "info";
+  note: string | null;
+}
+
+export interface PayslipCheck {
+  month: string | null;
+  prorated: number | null;
+  lines: PayslipLine[];
+  one_time: string[];
+  findings: string[];
+  verdict: string;
+  method: "ai" | "heuristic";
+}
+
 export interface NegotiationEmail {
   subject: string;
   body: string;
@@ -156,6 +194,7 @@ export interface ExtractionMeta {
   components?: { label: string; annual_amount: number; category: string }[];
   notes?: string[];
   estimated_split?: boolean;
+  ocr?: boolean;
   estimates?: { kind: "split" | "gross" | "balance" | "monthly_ctc"; amount: number; message: string }[];
 }
 
@@ -169,6 +208,7 @@ export interface OfferDetail extends OfferSummary {
   suggestions: Suggestion[];
   red_flags: RedFlagReport;
   negotiation_points: NegotiationPoint[];
+  projection: Projection;
   has_raw_text: boolean;
 }
 
@@ -179,7 +219,13 @@ export interface SimulationResult {
 }
 
 export interface CompareResult {
-  rows: { offer_id: string; label: string; result: CalculationResult; red_flags: RedFlagReport | null }[];
+  rows: {
+    offer_id: string;
+    label: string;
+    result: CalculationResult;
+    red_flags: RedFlagReport | null;
+    three_year_cash: number | null;
+  }[];
   // Each best_* is null when two or more offers tie for the lead
   best_monthly_in_hand: string | null;
   best_annual_take_home: string | null;
@@ -247,6 +293,13 @@ export const api = {
   explain: (id: string, refresh = false) =>
     post<{ explanation: string; method?: string }>(`/api/offers/${id}/explain?refresh=${refresh}`, {}),
   ask: (id: string, question: string) => post<{ answer: string }>(`/api/offers/${id}/ask`, { question }),
+  projection: (id: string, hike: number) => request<Projection>(`/api/offers/${id}/projection?hike=${hike}`),
+  checkPayslip: (id: string, input: File | string) => {
+    const fd = new FormData();
+    if (typeof input === "string") fd.append("text", input);
+    else fd.append("file", input);
+    return request<PayslipCheck>(`/api/offers/${id}/payslip`, { method: "POST", body: fd });
+  },
   negotiationEmail: (id: string, body: { points: string[]; goal?: string; candidate_name?: string }) =>
     post<NegotiationEmail>(`/api/offers/${id}/negotiation-email`, body),
   simulate: (offerId: string, assumptions: Assumptions, hikePct: number, overrides: Partial<Record<NumericField, number>>) =>

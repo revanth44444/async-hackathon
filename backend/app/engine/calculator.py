@@ -63,6 +63,14 @@ def _fixed(s: SalaryStructure) -> float:
     return sum(getattr(s, k) for k in FIXED_KEYS)
 
 
+PF_CAP_ANNUAL = 0.12 * PF_WAGE_CEILING  # ₹21,600: 12% of the ₹15,000 statutory wage ceiling
+
+
+def _default_pf(basic: float) -> float:
+    """PF when the letter doesn't state it: most employers contribute on the statutory ceiling (₹1,800 a month)."""
+    return round(min(0.12 * basic, PF_CAP_ANNUAL))
+
+
 def _typical_split(fixed_pay: float) -> dict[str, float]:
     """Typical Indian structure for a fixed-pay amount: basic 40%, HRA half of basic, rest special allowance."""
     basic = round(fixed_pay * 0.40)
@@ -95,7 +103,7 @@ def complete_structure(s: SalaryStructure, stated_gross: float = 0.0) -> tuple[S
         # CTC and gross, no breakup: the letter's own gross is the fixed cash, so split that, derive PF and
         # gratuity from its basic, and treat what's left of the CTC as benefits (insurance and the like)
         s = s.model_copy(update=_typical_split(stated_gross))
-        s.employer_pf = s.employer_pf or round(s.basic * 0.12)
+        s.employer_pf = s.employer_pf or _default_pf(s.basic)
         s.gratuity = s.gratuity or round(s.basic * 0.0481)
         rest = round(fixed_ctc - stated_gross - s.employer_pf - s.gratuity)
         if rest > 0:
@@ -103,24 +111,27 @@ def complete_structure(s: SalaryStructure, stated_gross: float = 0.0) -> tuple[S
         estimates.append({"kind": "gross", "amount": stated_gross,
                           "message": f"The letter gives a gross salary of {inr(stated_gross)} a year and a CTC of "
                           f"{inr(s.ctc)} but no breakup. We split the gross in a typical way (basic 40%, HRA half of "
-                          "basic, 12% PF) and treated the rest of the CTC as PF, gratuity and benefits."})
+                          "basic, PF at the usual ₹1,800 a month) and treated the rest of the CTC as PF, gratuity and benefits."})
     elif fixed <= 0 and s.ctc > 0:
         # CTC only: split the fixed part of the CTC, with employer PF and gratuity inside it
-        # fixed_ctc = fixed pay + 12% PF + 4.81% gratuity on basic (basic = 40% of fixed pay)
+        # fixed_ctc = fixed pay + PF + 4.81% gratuity on basic (basic = 40% of fixed pay), with PF at 12% of basic
+        # up to the ₹1,800-a-month cap
         fixed_pay = fixed_ctc / (1 + 0.40 * (0.12 + 0.0481))
+        if s.employer_pf <= 0 and 0.12 * 0.40 * fixed_pay > PF_CAP_ANNUAL:
+            fixed_pay = (fixed_ctc - PF_CAP_ANNUAL) / (1 + 0.40 * 0.0481)
         s = s.model_copy(update=_typical_split(fixed_pay))
         if s.employer_pf <= 0:
-            s.employer_pf = round(s.basic * 0.12)
+            s.employer_pf = _default_pf(s.basic)
         if s.gratuity <= 0:
             s.gratuity = round(s.basic * 0.0481)
         s.special_allowance += round(fixed_ctc - _fixed(s) - s.employer_pf - s.gratuity)  # absorb rounding
         estimates.append({"kind": "split", "amount": s.ctc,
                           "message": "The letter states only the total CTC, so the salary split is a typical estimate "
-                          "(basic 40% of fixed pay, HRA half of basic, 12% PF)."})
+                          "(basic 40% of fixed pay, HRA half of basic, PF at the usual ₹1,800 a month)."})
     elif fixed <= 0 and stated_gross > 0:
         # Gross only: the gross is the fixed cash; employer PF and gratuity sit on top to form the CTC
         s = s.model_copy(update=_typical_split(stated_gross))
-        s.employer_pf = s.employer_pf or round(s.basic * 0.12)
+        s.employer_pf = s.employer_pf or _default_pf(s.basic)
         s.gratuity = s.gratuity or round(s.basic * 0.0481)
         s.ctc = 0  # derived from the components below
         estimates.append({"kind": "gross", "amount": stated_gross,
@@ -165,7 +176,7 @@ def _employee_pf(s: SalaryStructure, a: Assumptions) -> float:
         return 0.0
     if a.pf_on_capped_wage:
         return 0.12 * min(s.basic, PF_WAGE_CEILING)
-    return s.employer_pf if s.employer_pf > 0 else 0.12 * s.basic
+    return s.employer_pf if s.employer_pf > 0 else _default_pf(s.basic)
 
 
 def _hra_exemption(s: SalaryStructure, a: Assumptions) -> float:
