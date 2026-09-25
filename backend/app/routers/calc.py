@@ -11,7 +11,7 @@ from app.engine.insights import CompareResult, CompareRow, SimulationResult, com
 from app.engine.schemas import Assumptions, CalculationResult, SalaryStructure
 from app.models import Offer
 from app.services.cleanup import record_activity
-from app.services.explain import compare_verdict, winners_summary
+from app.services.explain import compare_verdict
 
 router = APIRouter(prefix="/api", tags=["calculator"])
 
@@ -81,7 +81,7 @@ def compare(body: CompareRequest, owner: str = Depends(client_id), db: Session =
     result = compare_metrics(rows)
     if body.ai_verdict:
         winners, suits = result.winners(), result.suitability()
-        result.verdict = compare_verdict([(r.label, r.result) for r in rows], winners, suits) or winners_summary(winners, suits)
+        result.verdict = compare_verdict([(r.label, r.result) for r in rows], winners, suits)
     record_activity(db)
     db.commit()
     return result

@@ -246,34 +246,35 @@ def answer_question(r: CalculationResult, question: str, raw_text: str | None) -
     return text or "I couldn't answer that reliably from the calculated figures. The breakdown on this page has the exact numbers."
 
 
-def compare_verdict(labelled: list[tuple[str, CalculationResult]], winners: dict[str, str], suits: str) -> str | None:
-    """`winners` maps each metric to the offer that leads on it and `suits` is the closing recommendation;
-    both are decided in Python, not by the model."""
+def compare_verdict(labelled: list[tuple[str, CalculationResult]], winners: dict[str, str], suits: str) -> str:
+    """AI trade-off discussion followed by the winners list and recommendation. The last two are decided
+    and written in Python, so the model can never misstate who leads on what."""
     data = {label: facts(r) for label, r in labelled}
     offer_rules = {label: rules(r) for label, r in labelled}
     prompt = (
-        "Compare these offers for the candidate. Focus on guaranteed monthly in-hand pay, variable risk, "
-        "long-term and non-cash value, and one-time bonuses. The WINNERS below are final. Never say an offer leads "
-        "on a measure it does not win. If different offers win different measures, say so plainly and explain "
-        "the trade-off. End with the CONCLUSION below. You may reword it, but never change which offer it names "
-        "for which kind of candidate. Max 200 words.\n\n"
-        f"CONCLUSION:\n{suits}\n\n"
+        "Compare these offers for the candidate in under 150 words. Discuss guaranteed monthly in-hand pay, variable "
+        "risk, long-term and non-cash value, and one-time bonuses, using the figures in DATA. A list of which offer "
+        "leads on each measure, and the final recommendation, are shown to the reader separately right after your "
+        "text: do not list winners, do not write a conclusion or recommendation, and never call an offer the highest, "
+        "lowest, most, best or better on any measure. Contradicting the WINNERS below is never allowed.\n\n"
         f"WINNERS:\n{json.dumps(winners, ensure_ascii=False)}\n\nDATA:\n{json.dumps(data, ensure_ascii=False)}\n\n"
         f"RULES:\n{json.dumps(offer_rules, ensure_ascii=False)}"
     )
     try:
-        return verified_chat(
+        text = verified_chat(
             [{"role": "system", "content": SYSTEM}, {"role": "user", "content": prompt}],
             allowed_amounts([r for _, r in labelled], prompt),
             temperature=0.2,
             max_tokens=800,
         )
     except AIUnavailable:
-        return None
+        text = None
+    summary = winners_summary(winners, suits)
+    return f"### The trade-offs\n\n{text.strip()}\n\n{summary}" if text else summary
 
 
 def winners_summary(winners: dict[str, str], suits: str) -> str:
-    """Deterministic verdict used when the AI is unavailable or fails verification."""
+    """Who leads on what, plus the recommendation. Always shown; the whole verdict when the AI is unavailable."""
     by_offer: dict[str, list[str]] = {}
     for metric, label in winners.items():
         by_offer.setdefault(label, []).append(metric[0].lower() + metric[1:])
@@ -281,5 +282,5 @@ def winners_summary(winners: dict[str, str], suits: str) -> str:
     lines += [f"- {label}: {'; '.join(metrics)}." for label, metrics in by_offer.items()]
     if len(by_offer) > 1:
         lines.append("\nNo single offer wins on everything.")
-    lines.append(f"\n{suits}")
+    lines += ["\n### Our recommendation\n", suits]
     return "\n".join(lines)

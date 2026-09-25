@@ -71,3 +71,19 @@ def test_suitability_splits_when_different_offers_lead():
     risky = SalaryStructure(ctc=2_000_000, basic=400_000, hra=200_000, special_allowance=352_000, employer_pf=48_000, variable_pay=1_000_000)
     suits = _compare(steady, risky).suitability()
     assert "For certainty, Offer 0" in suits and "variable pay, Offer 1" in suits
+
+
+def test_compare_verdict_always_ends_with_python_winners(monkeypatch):
+    import app.services.explain as ex
+    res = _compare(NIMBUS, QUANTORA)
+    labelled = [(r.label, r.result) for r in res.rows]
+    monkeypatch.setattr(ex, "chat", lambda *a, **k: "Both offers trade fixed pay against variable pay.")
+    v = ex.compare_verdict(labelled, res.winners(), res.suitability())
+    assert v.startswith("### The trade-offs") and v.endswith(res.suitability())
+    for metric, label in res.winners().items():
+        assert f"{label}:" in v and metric[1:] in v
+
+    def down(*a, **k):
+        raise ex.AIUnavailable("down")
+    monkeypatch.setattr(ex, "chat", down)
+    assert ex.compare_verdict(labelled, res.winners(), res.suitability()) == ex.winners_summary(res.winners(), res.suitability())
