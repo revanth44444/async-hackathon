@@ -10,12 +10,14 @@ from app.config import settings
 from app.db import get_db
 from app.deps import client_id
 from app.engine.calculator import calculate, complete_structure
+from app.engine.flags import RedFlagReport, red_flags
 from app.engine.insights import Suggestion, suggestions
 from app.engine.schemas import Assumptions, CalculationResult, SalaryStructure
 from app.models import Offer
 from app.services.cleanup import record_activity
 from app.services.explain import answer_question, explain_offer
-from app.services.extraction import extract_structure
+from app.services.extraction import _annualise_esop, extract_structure
+from app.services.negotiate import NegotiationEmail, NegotiationPoint, negotiation_email, negotiation_points
 from app.services.pdf import PDFError, extract_text
 
 router = APIRouter(prefix="/api/offers", tags=["offers"])
@@ -30,6 +32,8 @@ class OfferSummary(BaseModel):
     ctc: float
     monthly_in_hand: float
     annual_take_home: float
+    red_flag_score: int
+    red_flag_level: str
     created_at: datetime
 
 
@@ -41,6 +45,8 @@ class OfferDetail(OfferSummary):
     extraction_meta: dict
     explanation: str | None
     suggestions: list[Suggestion]
+    red_flags: RedFlagReport
+    negotiation_points: list[NegotiationPoint]
     has_raw_text: bool
 
 
@@ -65,7 +71,19 @@ class Question(BaseModel):
     question: str = Field(min_length=3, max_length=500)
 
 
-def _summary(o: Offer) -> OfferSummary:
+class NegotiationRequest(BaseModel):
+    points: list[str] = Field(default_factory=list, max_length=20)  # NegotiationPoint keys to include
+    goal: str | None = Field(None, max_length=400)
+    candidate_name: str | None = Field(None, max_length=100)
+
+
+def _report(o: Offer) -> RedFlagReport:
+    meta = o.extraction_meta or {}
+    return red_flags(CalculationResult(**o.result), o.raw_text or "", meta.get("notes"), bool(meta.get("estimated_split")))
+
+
+def _summary(o: Offer, report: RedFlagReport | None = None) -> OfferSummary:
+    report = report or _report(o)
     return OfferSummary(
         id=o.id,
         label=o.label,
@@ -75,21 +93,26 @@ def _summary(o: Offer) -> OfferSummary:
         ctc=o.result["structure"]["ctc"],
         monthly_in_hand=o.result["monthly_in_hand"],
         annual_take_home=o.result["annual_take_home"],
+        red_flag_score=report.score,
+        red_flag_level=report.level,
         created_at=o.created_at,
     )
 
 
 def _detail(o: Offer) -> OfferDetail:
     s, a = SalaryStructure(**o.structure), Assumptions(**o.assumptions)
+    report, tips = _report(o), suggestions(s, a)
     return OfferDetail(
-        **_summary(o).model_dump(),
+        **_summary(o, report).model_dump(),
         filename=o.filename,
         structure=s,
         assumptions=a,
         result=CalculationResult(**o.result),
         extraction_meta=o.extraction_meta or {},
         explanation=o.explanation,
-        suggestions=suggestions(s, a),
+        suggestions=tips,
+        red_flags=report,
+        negotiation_points=negotiation_points(CalculationResult(**o.result), report, tips),
         has_raw_text=bool(o.raw_text),
     )
 
@@ -113,11 +136,26 @@ def _record_estimates(meta: dict, estimates: list[dict]) -> None:
     meta["estimated_split"] = any(e["kind"] in ("split", "gross") for e in estimates)
 
 
+def refresh(o: Offer, db: Session) -> Offer:
+    """Bring an offer saved by an older engine up to date: re-read an ESOP grant stored as a yearly value, and
+    recalculate with the current rules. Saved only if something changed, so this is cheap and idempotent."""
+    s, a = SalaryStructure(**o.structure), Assumptions(**o.assumptions)
+    if o.raw_text:
+        s = _annualise_esop(s, o.raw_text)
+    fresh = calculate(s, a)
+    if fresh.structure.model_dump() != o.structure or fresh.model_dump(mode="json") != o.result:
+        explanation = o.explanation if fresh.structure.model_dump() == o.structure else None
+        _apply(o, s, a)
+        o.explanation = explanation  # keep a cached explanation unless the salary figures themselves changed
+        db.commit()
+    return o
+
+
 def _get(db: Session, offer_id: str, owner: str) -> Offer:
     o = db.get(Offer, offer_id)
     if not o or o.owner_id != owner:  # same 404 either way, so IDs can't be probed
         raise HTTPException(404, "Offer not found")
-    return o
+    return refresh(o, db)
 
 
 def _create_from_text(db: Session, owner: str, text: str, source: str, label: str | None, filename: str | None) -> Offer:
@@ -150,7 +188,7 @@ def _create_from_text(db: Session, owner: str, text: str, source: str, label: st
 @router.get("", response_model=list[OfferSummary])
 def list_offers(owner: str = Depends(client_id), db: Session = Depends(get_db)):
     q = select(Offer).where(Offer.owner_id == owner).order_by(Offer.created_at.desc())
-    return [_summary(o) for o in db.scalars(q)]
+    return [_summary(refresh(o, db)) for o in db.scalars(q)]
 
 
 @router.post("/upload", response_model=OfferDetail, status_code=201)
@@ -187,6 +225,13 @@ def create_sample(name: str, owner: str = Depends(client_id), db: Session = Depe
     """Loads one of the fictional demo letters into this visitor's private space."""
     if name not in SAMPLES:
         raise HTTPException(404, "Unknown sample")
+    # Loading the same sample twice opens the existing copy instead of cluttering the library with duplicates
+    existing = db.scalars(
+        select(Offer).where(Offer.owner_id == owner, Offer.source == "sample", Offer.filename == SAMPLES[name])
+        .order_by(Offer.created_at.desc())
+    ).first()
+    if existing:
+        return _detail(refresh(existing, db))
     text = extract_text((SAMPLES_DIR / SAMPLES[name]).read_bytes())
     return _detail(_create_from_text(db, owner, text, "sample", None, SAMPLES[name]))
 
@@ -252,3 +297,12 @@ def explain(offer_id: str, refresh: bool = False, owner: str = Depends(client_id
 def ask(offer_id: str, body: Question, owner: str = Depends(client_id), db: Session = Depends(get_db)):
     o = _get(db, offer_id, owner)
     return {"answer": answer_question(CalculationResult(**o.result), body.question, o.raw_text)}
+
+
+@router.post("/{offer_id}/negotiation-email", response_model=NegotiationEmail)
+def draft_negotiation_email(offer_id: str, body: NegotiationRequest, owner: str = Depends(client_id), db: Session = Depends(get_db)):
+    o = _get(db, offer_id, owner)
+    detail = _detail(o)
+    chosen = [p for p in detail.negotiation_points if p.key in body.points] if body.points else detail.negotiation_points
+    name = body.candidate_name or (o.extraction_meta or {}).get("candidate_name")
+    return negotiation_email(detail.result, chosen, body.goal, name)

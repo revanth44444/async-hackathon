@@ -21,7 +21,8 @@ def test_wrong_lakh_conversion_is_caught():
 
 def test_facts_are_preformatted_and_one_time_items_have_no_monthly_figure():
     f = facts(calculate(NIMBUS))
-    assert f["annual_take_home"].startswith("₹14,") and "L)" in f["annual_take_home"]
+    k = "annual_take_home_including_variable_pay"
+    assert f[k].startswith("₹14,") and "L)" in f[k]
     joining = next(c for c in f["components"] if c["name"] == "Joining Bonus")
     assert "per_month" not in joining and joining["ctc"] == "outside the stated CTC"
 
@@ -83,3 +84,11 @@ def test_compare_verdict_attributes_each_figure_to_its_own_offer():
     assert "ESOP" not in nimbus_line and inr(636_000) in quantora_line
     assert inr(100_000) in nimbus_line and "joining" not in quantora_line
     assert v.endswith(res.suitability())
+
+
+def test_one_time_bonuses_are_not_described_per_year():
+    s = NIMBUS.model_copy(update={"retention_bonus": 50_000, "retention_after_months": 18})
+    comps = {c["name"]: c for c in facts(calculate(s))["components"]}
+    for name in ("Joining Bonus", "Retention Bonus"):
+        assert "per_year" not in comps[name] and "one_time_amount" in comps[name]
+    assert "18 months" in comps["Retention Bonus"]["condition"]

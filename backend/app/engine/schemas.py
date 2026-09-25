@@ -29,6 +29,8 @@ class SalaryStructure(BaseModel):
     insurance: float = 0
     variable_pay: float = 0
     joining_bonus: float = 0
+    retention_bonus: float = 0  # paid only if still employed after retention_after_months; not a joining bonus
+    retention_after_months: float = 0  # 0 = the letter doesn't say when
     esop_value: float = 0  # annualised vesting value; not taxed until exercise
 
 

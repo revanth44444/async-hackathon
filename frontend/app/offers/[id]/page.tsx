@@ -10,6 +10,8 @@ import {
   EstimateNotice,
   Explanation,
   LetterNotes,
+  Negotiation,
+  RedFlags,
   RegimeGuide,
   RegimePanel,
   StatRow,
@@ -45,6 +47,8 @@ export default function OfferPage() {
   // Remount stateful sections whenever the saved numbers change
   const version = JSON.stringify([offer.structure, offer.assumptions]);
   const meta = [offer.role, offer.structure.location].filter(Boolean).join(" · ");
+  const st = offer.structure;
+  const retentionInYearOne = st.retention_bonus > 0 && st.retention_after_months > 0 && st.retention_after_months <= 12;
 
   return (
     <>
@@ -81,9 +85,9 @@ export default function OfferPage() {
                 Only this browser can see this offer.{offer.filename ? " The original PDF was not stored." : ""}
               </p>
             </div>
-            {offer.structure.joining_bonus > 0 && (
+            {(st.joining_bonus > 0 || retentionInYearOne) && (
               <p className="text-sm text-white/55 sm:text-right">
-                Year one with the joining bonus, after tax
+                {st.joining_bonus > 0 && !retentionInYearOne ? "Year one with the joining bonus, after tax" : "Year one with one-time bonuses, after tax"}
                 <span className="tabular mt-1 block text-2xl text-white">{inr(r.year_one_take_home)}</span>
               </p>
             )}
@@ -118,6 +122,16 @@ export default function OfferPage() {
             <Suggestions items={offer.suggestions} />
             <LetterNotes notes={offer.extraction_meta.notes} />
           </div>
+        </section>
+
+        <section className="grid gap-16 lg:grid-cols-2">
+          <RedFlags report={offer.red_flags} />
+          <Negotiation
+            key={`neg-${version}`}
+            offerId={offer.id}
+            points={offer.negotiation_points}
+            defaultName={offer.extraction_meta.candidate_name}
+          />
         </section>
 
         <section className="grid gap-16 lg:grid-cols-2">

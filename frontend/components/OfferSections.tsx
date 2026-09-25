@@ -3,7 +3,18 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { ArrowUp, Loader2 } from "lucide-react";
-import { api, type CalculationResult, type NumericField, type OfferDetail, type Regime, type SalaryStructure, type Suggestion } from "@/lib/api";
+import {
+  api,
+  type CalculationResult,
+  type NegotiationEmail,
+  type NegotiationPoint,
+  type NumericField,
+  type OfferDetail,
+  type RedFlagReport,
+  type Regime,
+  type SalaryStructure,
+  type Suggestion,
+} from "@/lib/api";
 import { inr, lakh, pct } from "@/lib/format";
 
 function SectionHead({ eyebrow, title, sub, action }: { eyebrow: string; title: string; sub?: string; action?: React.ReactNode }) {
@@ -71,15 +82,28 @@ const EDITABLE: { key: NumericField; label: string; group: string }[] = [
   { key: "insurance", label: "Insurance & benefits", group: "Benefits" },
   { key: "variable_pay", label: "Variable pay", group: "Not paid monthly" },
   { key: "joining_bonus", label: "Joining bonus", group: "Not paid monthly" },
+  { key: "retention_bonus", label: "Retention bonus", group: "Not paid monthly" },
   { key: "esop_value", label: "ESOPs per year", group: "Not paid monthly" },
 ];
 
-/** Items that must never be shown as a monthly figure. */
-const NOT_MONTHLY: Partial<Record<NumericField, string>> = {
-  variable_pay: "Yearly",
-  joining_bonus: "One-time",
-  esop_value: "Vests yearly",
-};
+/** Items that must never be shown as a monthly figure, with what to show instead. */
+function notMonthly(key: NumericField, s: SalaryStructure): string | undefined {
+  switch (key) {
+    case "variable_pay":
+      return "Yearly";
+    case "joining_bonus":
+      return "One-time";
+    case "retention_bonus":
+      return s.retention_after_months > 0 ? `After ${s.retention_after_months} months` : "If you stay";
+    case "esop_value":
+      return "Vests yearly";
+    case "gratuity":
+      return "After 5 years";
+  }
+}
+
+/** Extras a letter may or may not count inside the CTC, so they get an In/Outside CTC tag. */
+const CTC_TAGGED = new Set<NumericField>(["variable_pay", "joining_bonus", "retention_bonus", "esop_value"]);
 
 export function BreakdownEditor({ offer, onSaved }: { offer: OfferDetail; onSaved: (o: OfferDetail) => void }) {
   const [editing, setEditing] = useState(false);
@@ -162,14 +186,14 @@ export function BreakdownEditor({ offer, onSaved }: { offer: OfferDetail; onSave
                     <span title={desc[f.key]} className={desc[f.key] ? "cursor-help" : ""}>
                       {f.label}
                     </span>
-                    {!editing && NOT_MONTHLY[f.key] && offer.structure[f.key] > 0 && (
+                    {!editing && CTC_TAGGED.has(f.key) && offer.structure[f.key] > 0 && (
                       <span className="ml-3 text-[10px] uppercase tracking-[0.18em] text-muted">
                         {outsideCtc.has(f.key) ? "Outside CTC" : "In CTC"}
                       </span>
                     )}
                   </td>
                   <td className="tabular py-3 text-right text-muted">
-                    {NOT_MONTHLY[f.key] ?? inr((editing ? draft : offer.structure)[f.key] / 12)}
+                    {notMonthly(f.key, offer.structure) ?? inr((editing ? draft : offer.structure)[f.key] / 12)}
                   </td>
                   <td className="py-3 text-right">
                     {editing ? (
@@ -491,6 +515,157 @@ export function RegimeGuide({ r }: { r: CalculationResult }) {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+const SEVERITY_LABEL = { high: "High", medium: "Medium", low: "Low" } as const;
+
+/** Deterministic red-flag score: every point deducted traces to a figure or a line of the letter. */
+export function RedFlags({ report }: { report: RedFlagReport }) {
+  const tone = report.level === "Low risk" ? "text-good" : report.level === "High risk" ? "text-bad" : "text-ink";
+  return (
+    <div>
+      <SectionHead eyebrow="Red flags" title="What to watch for" sub="Scored from the figures and the letter's own wording. Higher is safer." />
+      <div className="flex items-end gap-5 border-b border-line pb-8">
+        <p className={`tabular text-[64px] leading-none tracking-[-0.03em] ${tone}`} style={{ fontWeight: 200 }}>
+          {report.score}
+        </p>
+        <div className="pb-2">
+          <p className="text-xs text-muted">out of 100</p>
+          <p className={`mt-1 text-[15px] ${tone}`}>{report.level}</p>
+        </div>
+      </div>
+      {report.flags.length === 0 ? (
+        <p className="mt-6 text-sm text-muted">Nothing in this offer stood out as a red flag.</p>
+      ) : (
+        <ul className="divide-y divide-line border-b border-line">
+          {report.flags.map((f) => (
+            <li key={f.key} className="flex gap-5 py-5">
+              <span
+                className={`mt-0.5 w-16 shrink-0 text-[10px] uppercase tracking-[0.18em] ${
+                  f.severity === "high" ? "text-bad" : f.severity === "medium" ? "text-ink" : "text-muted"
+                }`}
+              >
+                {SEVERITY_LABEL[f.severity]}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[15px]">{f.title}</p>
+                <p className="mt-1 text-sm text-muted">{f.detail}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** Pick talking points (chosen by the engine), then have the AI word them as an email. */
+export function Negotiation({ offerId, points, defaultName }: { offerId: string; points: NegotiationPoint[]; defaultName?: string | null }) {
+  const [chosen, setChosen] = useState<string[]>(() => points.map((p) => p.key));
+  const [name, setName] = useState(defaultName ?? "");
+  const [goal, setGoal] = useState("");
+  const [email, setEmail] = useState<NegotiationEmail | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const toggle = (key: string) => setChosen((c) => (c.includes(key) ? c.filter((k) => k !== key) : [...c, key]));
+
+  async function draft() {
+    setBusy(true);
+    setError(null);
+    setCopied(false);
+    try {
+      // Keep the engine's order, whatever order the boxes were ticked in
+      const ordered = points.map((p) => p.key).filter((k) => chosen.includes(k));
+      setEmail(await api.negotiationEmail(offerId, { points: ordered, goal: goal.trim() || undefined, candidate_name: name.trim() || undefined }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't draft the email");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copy() {
+    if (!email) return;
+    try {
+      await navigator.clipboard.writeText(`Subject: ${email.subject}\n\n${email.body}`);
+      setCopied(true);
+    } catch {
+      setError("Copy failed. Select the text and copy it manually.");
+    }
+  }
+
+  return (
+    <div>
+      <SectionHead eyebrow="Negotiate" title="Ask for a better offer" sub="Points picked from this offer. Untick any you don't want to raise." />
+      <ul className="divide-y divide-line border-y border-line">
+        {points.map((p) => (
+          <li key={p.key}>
+            <label className="flex cursor-pointer gap-4 py-4">
+              <input type="checkbox" className="mt-1 size-4 shrink-0 accent-[var(--accent)]" checked={chosen.includes(p.key)} onChange={() => toggle(p.key)} />
+              <span className="min-w-0 flex-1">
+                <span className="block text-[15px]">{p.ask}</span>
+                {p.why && <span className="mt-1 block text-sm text-muted">{p.why}</span>}
+              </span>
+            </label>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-6 grid gap-3 sm:grid-cols-[1fr_2fr]">
+        <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" maxLength={100} />
+        <input
+          className="input"
+          value={goal}
+          onChange={(e) => setGoal(e.target.value)}
+          placeholder="Anything specific? e.g. a start date in March (optional)"
+          maxLength={400}
+        />
+      </div>
+      <button className="btn-primary mt-6" onClick={draft} disabled={busy || chosen.length === 0}>
+        {busy && <Loader2 size={14} className="animate-spin" />}
+        {busy ? "Drafting your email" : email ? "Draft again" : "Draft negotiation email"}
+      </button>
+      {error && <p className="mt-4 text-sm text-bad">{error}</p>}
+      {email && (
+        <div className="mt-8 rounded-[22px] bg-surface-2 p-6">
+          <label className="eyebrow" htmlFor="neg-subject">
+            Subject
+          </label>
+          <input
+            id="neg-subject"
+            className="input-box mt-2"
+            value={email.subject}
+            onChange={(e) => setEmail({ ...email, subject: e.target.value })}
+          />
+          <label className="eyebrow mt-6 block" htmlFor="neg-body">
+            Email
+          </label>
+          <textarea
+            id="neg-body"
+            className="input-box mt-2 min-h-[320px] text-[15px] leading-relaxed"
+            value={email.body}
+            onChange={(e) => setEmail({ ...email, body: e.target.value })}
+          />
+          <div className="mt-5 flex flex-wrap items-center gap-6">
+            <button className="btn-primary" onClick={copy}>
+              {copied ? "Copied" : "Copy email"}
+            </button>
+            <a
+              className="link-cta"
+              href={`mailto:?subject=${encodeURIComponent(email.subject)}&body=${encodeURIComponent(email.body)}`}
+            >
+              Open in mail app
+            </a>
+          </div>
+          <p className="mt-4 text-xs text-muted">
+            {email.method === "template" ? "Template draft. AI is currently unavailable." : "Written by AI from the points above."} Read it
+            before sending.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

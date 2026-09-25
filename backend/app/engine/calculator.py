@@ -1,4 +1,5 @@
 """Deterministic CTC → take-home calculator. Same input always yields the same output."""
+import itertools
 import math
 
 from app.engine import tax as rules
@@ -34,6 +35,7 @@ COMPONENTS: list[tuple[str, str, str, str]] = [
     ("insurance", "Insurance & Benefits", "benefit", "Health/term insurance premiums paid by the employer. Non-cash."),
     ("variable_pay", "Variable / Performance Pay", "variable", "Target bonus. Actual payout depends on performance and is usually paid yearly or quarterly."),
     ("joining_bonus", "Joining Bonus", "one_time", "One-time payment, usually with a clawback if you leave early."),
+    ("retention_bonus", "Retention Bonus", "one_time", "Paid only if you are still employed at the stated date. Leave earlier and you get none of it."),
     ("esop_value", "ESOPs / RSUs (annual)", "equity", "Equity value. Not cash, and taxed only when exercised or vested."),
 ]
 
@@ -51,6 +53,8 @@ def inr(v: float) -> str:
     return f"{sign}₹{s}"
 
 
+# Extras a letter may or may not count inside the stated CTC
+EXTRA_KEYS = ("joining_bonus", "retention_bonus", "esop_value")
 FIXED_KEYS = ("basic", "hra", "special_allowance", "lta", "meal_allowance", "other_allowances")
 MIN_PLAUSIBLE_ANNUAL_CTC = 1_00_000  # below this, a lone "CTC" figure is almost certainly monthly
 
@@ -86,7 +90,7 @@ def complete_structure(s: SalaryStructure, stated_gross: float = 0.0) -> tuple[S
 
     if fixed <= 0 and s.ctc > 0:
         # CTC only: split the fixed part of the CTC, with employer PF and gratuity inside it
-        fixed_ctc = s.ctc - s.variable_pay - s.joining_bonus - s.esop_value - s.insurance - s.employer_nps
+        fixed_ctc = s.ctc - s.variable_pay - s.joining_bonus - s.retention_bonus - s.esop_value - s.insurance - s.employer_nps
         # fixed_ctc = fixed pay + 12% PF + 4.81% gratuity on basic (basic = 40% of fixed pay)
         fixed_pay = fixed_ctc / (1 + 0.40 * (0.12 + 0.0481))
         s = s.model_copy(update=_typical_split(fixed_pay))
@@ -109,8 +113,7 @@ def complete_structure(s: SalaryStructure, stated_gross: float = 0.0) -> tuple[S
                           "breakup, so the split is a typical estimate and the CTC is derived from it."})
     elif fixed > 0 and s.ctc > 0:
         recurring = fixed + s.employer_pf + s.gratuity + s.employer_nps + s.insurance + s.variable_pay
-        joining_in, esop_in = ctc_inclusion(s, recurring)
-        gap = s.ctc - recurring - (s.joining_bonus if joining_in else 0) - (s.esop_value if esop_in else 0)
+        gap = s.ctc - recurring - _included_total(s, ctc_inclusion(s, recurring))
         if gap > 0.01 * s.ctc:
             s.special_allowance += round(gap)
             estimates.append({"kind": "balance", "amount": round(gap),
@@ -119,16 +122,27 @@ def complete_structure(s: SalaryStructure, stated_gross: float = 0.0) -> tuple[S
     return s, estimates
 
 
-def ctc_inclusion(s: SalaryStructure, recurring_ctc: float) -> tuple[bool, bool]:
-    """Whether the stated CTC includes the joining bonus / ESOPs, inferred from the gap between the
-    stated CTC and the recurring components. Letters differ, so we check which combination fits."""
+def ctc_inclusion(s: SalaryStructure, recurring_ctc: float) -> dict[str, bool]:
+    """Which extras (joining bonus, retention bonus, ESOPs) the stated CTC includes, inferred from the gap
+    between the stated CTC and the recurring components. Letters differ, so we look for the combination that
+    fits; larger combinations are tried first."""
+    present = [k for k in EXTRA_KEYS if getattr(s, k) > 0]
     gap = s.ctc - recurring_ctc
     tol = max(0.01 * s.ctc, 1)
-    for joining, esop in ((True, True), (True, False), (False, True)):
-        expected = (s.joining_bonus if joining else 0) + (s.esop_value if esop else 0)
-        if expected > 0 and abs(gap - expected) <= tol:
-            return joining and s.joining_bonus > 0, esop and s.esop_value > 0
-    return False, False
+    for size in range(len(present), 0, -1):
+        for combo in itertools.combinations(present, size):
+            if abs(gap - sum(getattr(s, k) for k in combo)) <= tol:
+                return {k: k in combo for k in EXTRA_KEYS}
+    return dict.fromkeys(EXTRA_KEYS, False)
+
+
+def _included_total(s: SalaryStructure, inclusion: dict[str, bool]) -> float:
+    return sum(getattr(s, k) for k in EXTRA_KEYS if inclusion[k])
+
+
+def retention_in_year_one(s: SalaryStructure) -> bool:
+    """A retention bonus counts towards year one only if the letter says it is paid within 12 months."""
+    return s.retention_bonus > 0 and 0 < s.retention_after_months <= 12
 
 
 def _employee_pf(s: SalaryStructure, a: Assumptions) -> float:
@@ -221,13 +235,19 @@ def calculate(s: SalaryStructure, a: Assumptions | None = None) -> CalculationRe
 
     if s.ctc <= 0:
         s.ctc = recurring_ctc
-    gap = s.ctc - recurring_ctc
-    joining_in, esop_in = ctc_inclusion(s, recurring_ctc)
-    unallocated = gap - (s.joining_bonus if joining_in else 0) - (s.esop_value if esop_in else 0)
+    inclusion = ctc_inclusion(s, recurring_ctc)
+    counted = recurring_ctc + _included_total(s, inclusion)
+    unallocated = s.ctc - counted
     if abs(unallocated) > 0.01 * s.ctc:
         warnings.append(
-            f"Components add up to {inr(recurring_ctc)} but the stated CTC is {inr(s.ctc)}. "
+            f"Components add up to {inr(counted)} but the stated CTC is {inr(s.ctc)}. "
             "Review the breakdown. Some components may be missing or misread."
+        )
+    elif -unallocated > max(1_000, 0.001 * s.ctc):
+        # Within rounding tolerance of a match, but the parts still exceed the CTC, which a real CTC never does
+        warnings.append(
+            f"Components add up to {inr(counted)}, which is {inr(-unallocated)} more than the stated CTC of "
+            f"{inr(s.ctc)}. One of them may be counted twice or may sit outside the CTC. Check the breakdown."
         )
     if s.basic <= 0:
         warnings.append("No basic salary was found. PF, HRA and gratuity estimates depend on it.")
@@ -242,7 +262,8 @@ def calculate(s: SalaryStructure, a: Assumptions | None = None) -> CalculationRe
         kw = dict(fixed_cash=fixed_cash, employee_pf=employee_pf, professional_tax=pt)
         tax_fixed = compute_tax(regime, s, a, **kw).total_tax
         tax_full = compute_tax(regime, s, a, **kw, extra_income=variable_paid)
-        tax_y1 = compute_tax(regime, s, a, **kw, extra_income=variable_paid + s.joining_bonus).total_tax
+        one_time = s.joining_bonus + (s.retention_bonus if retention_in_year_one(s) else 0)
+        tax_y1 = compute_tax(regime, s, a, **kw, extra_income=variable_paid + one_time).total_tax
 
         annual = fixed_cash + variable_paid - employee_pf - pt - tax_full.total_tax
         regimes[regime] = RegimeResult(
@@ -251,7 +272,7 @@ def calculate(s: SalaryStructure, a: Assumptions | None = None) -> CalculationRe
             monthly_tax=round(tax_fixed / 12, 2),
             monthly_in_hand=round((fixed_cash - employee_pf - pt - tax_fixed) / 12, 2),
             annual_take_home=round(annual, 2),
-            year_one_take_home=round(annual + s.joining_bonus - (tax_y1 - tax_full.total_tax), 2),
+            year_one_take_home=round(annual + one_time - (tax_y1 - tax_full.total_tax), 2),
         )
 
     new_tax, old_tax = regimes["new"].tax.total_tax, regimes["old"].tax.total_tax
@@ -259,16 +280,22 @@ def calculate(s: SalaryStructure, a: Assumptions | None = None) -> CalculationRe
     selected: Regime = recommended if a.regime == "auto" else a.regime
     chosen = regimes[selected]
 
-    in_ctc = {"joining_bonus": joining_in, "esop_value": esop_in}
+    months = s.retention_after_months
+    if months > 0:
+        retention_desc = (f"Paid only if you are still employed after {months:g} months. "
+                          "Leave earlier and you get none of it.")
+    else:
+        retention_desc = COMPONENTS[[k for k, *_ in COMPONENTS].index("retention_bonus")][3]
     components = [
         LineItem(
             key=key,
             label=label,
             annual=round(getattr(s, key), 2),
-            monthly=None if cat in ("variable", "one_time", "equity") else round(getattr(s, key) / 12, 2),
+            # Gratuity is paid only after 5 years, so it never gets a monthly figure either
+            monthly=None if cat in ("variable", "one_time", "equity") or key == "gratuity" else round(getattr(s, key) / 12, 2),
             category=cat,
-            description=desc,
-            in_ctc=in_ctc.get(key, True),
+            description=retention_desc if key == "retention_bonus" else desc,
+            in_ctc=inclusion.get(key, True),
         )
         for key, label, cat, desc in COMPONENTS
         if getattr(s, key) > 0
@@ -285,8 +312,9 @@ def calculate(s: SalaryStructure, a: Assumptions | None = None) -> CalculationRe
         Bucket(label="Gratuity", amount=s.gratuity),
         Bucket(label="Insurance & benefits", amount=s.insurance),
         Bucket(label="Variable not paid out", amount=s.variable_pay - variable_paid),
-        Bucket(label="Joining bonus (one-time)", amount=s.joining_bonus if joining_in else 0),
-        Bucket(label="ESOPs / RSUs", amount=s.esop_value if esop_in else 0),
+        Bucket(label="Joining bonus (one-time)", amount=s.joining_bonus if inclusion["joining_bonus"] else 0),
+        Bucket(label="Retention bonus (conditional)", amount=s.retention_bonus if inclusion["retention_bonus"] else 0),
+        Bucket(label="ESOPs / RSUs", amount=s.esop_value if inclusion["esop_value"] else 0),
         Bucket(label="Unallocated", amount=unallocated),
     ]
     buckets = [Bucket(label=b.label, amount=round(b.amount, 2)) for b in buckets if b.amount > 0.5]

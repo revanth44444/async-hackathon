@@ -124,6 +124,13 @@ export default function Home() {
                   <span>per month in-hand · {lakh(o.ctc)} CTC</span>
                   <ArrowUpRight size={16} strokeWidth={1.25} className="transition group-hover:text-ink" />
                 </div>
+                <p
+                  className={`mt-5 border-t border-line pt-4 text-[10px] uppercase tracking-[0.2em] ${
+                    o.red_flag_level === "High risk" ? "text-bad" : o.red_flag_level === "Low risk" ? "text-good" : "text-muted"
+                  }`}
+                >
+                  Red-flag score {o.red_flag_score}/100 · {o.red_flag_level}
+                </p>
               </div>
             ))}
           </div>

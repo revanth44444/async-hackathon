@@ -14,7 +14,7 @@ log = logging.getLogger(__name__)
 CATEGORIES = [
     "basic", "hra", "special_allowance", "lta", "meal_allowance", "other_allowances",
     "employer_pf", "gratuity", "employer_nps", "insurance", "variable_pay",
-    "joining_bonus", "esop_value", "ignore",
+    "joining_bonus", "retention_bonus", "esop_value", "ignore",
 ]
 
 SYSTEM_PROMPT = f"""You extract compensation data from Indian job offer letters.
@@ -24,6 +24,7 @@ Return ONLY a JSON object with this shape:
   "candidate_name": string|null, "joining_date": string|null,
   "stated_ctc_annual": number|null,
   "stated_gross_annual": number|null,
+  "retention_after_months": number|null,
   "components": [{{"label": string, "annual_amount": number, "category": string}}],
   "notes": [string]
 }}
@@ -37,7 +38,9 @@ Rules:
 - List every individual pay component exactly once. Use category "ignore" for subtotals and totals
   (Gross, Total Fixed, CTC, Net) so nothing is double counted.
 - Employer PF/provident fund → employer_pf. Performance/annual bonus/incentive → variable_pay.
-  Sign-on/joining/relocation bonus → joining_bonus. ESOP/RSU → esop_value (annual vesting value if stated,
+  Sign-on/joining/relocation bonus → joining_bonus. A retention, stay or loyalty bonus that is paid only after
+  a period of service → retention_bonus (never joining_bonus); set retention_after_months to that period in months
+  (e.g. "after 18 months" → 18, "after 2 years" → 24). ESOP/RSU → esop_value (annual vesting value if stated,
   else total grant / vesting years). Conveyance/telephone/internet/other allowances → other_allowances.
   Medical/health/term/accident insurance premium → insurance. Food coupons/meal card → meal_allowance.
 - notes: short observations a candidate should know (clawbacks, notice period, bond, probation, vesting schedule).
@@ -75,6 +78,7 @@ def _aggregate(data: dict) -> SalaryStructure:
         role=data.get("role"),
         location=data.get("location"),
         ctc=float(data.get("stated_ctc_annual") or 0),
+        retention_after_months=_num(data.get("retention_after_months")),
         **totals,
     )
 
@@ -115,6 +119,7 @@ KEYWORDS: list[tuple[str, str]] = [
     (r"gratuity", "gratuity"),
     (r"\bnps\b|national pension", "employer_nps"),
     (r"insurance|mediclaim|medical cover", "insurance"),
+    (r"retention|stay bonus|loyalty bonus", "retention_bonus"),
     (r"joining|sign[- ]?on|relocation", "joining_bonus"),
     (r"\besops?\b|\brsus?\b|stock", "esop_value"),
     (r"variable|performance|bonus|incentive", "variable_pay"),
@@ -190,7 +195,8 @@ def _extract_heuristic(text: str) -> tuple[SalaryStructure, dict]:
         company = " ".join(m.group(1).split())
     location = next((c.title() for c in CITY_STATE if c in text.lower()), None)
 
-    data = {"components": components, "stated_ctc_annual": stated_ctc, "company": company, "location": location}
+    data = {"components": components, "stated_ctc_annual": stated_ctc, "company": company, "location": location,
+            "retention_after_months": retention_months(text)}
     meta = {
         "method": "heuristic",
         "stated_gross_annual": stated_gross,
@@ -198,6 +204,18 @@ def _extract_heuristic(text: str) -> tuple[SalaryStructure, dict]:
         "notes": ["Parsed without AI (no GROQ_API_KEY). Check the extracted components carefully."],
     }
     return _aggregate(data), meta
+
+
+SERVICE_RE = re.compile(r"(?:after|on|upon)\s+(?:completing|completion of|completion)?\s*(\d+)\s*(months?|years?)", re.I)
+
+
+def retention_months(text: str) -> float:
+    """Months of service before a retention bonus is paid, read from the sentence that mentions it (0 if unstated)."""
+    for seg in SEGMENT_RE.split(text):
+        if re.search(r"retention|stay bonus|loyalty bonus", seg, re.I) and (m := SERVICE_RE.search(seg)):
+            n = float(m.group(1))
+            return n * 12 if m.group(2).lower().startswith("year") else n
+    return 0.0
 
 
 VEST_RE = re.compile(r"(?:over|across)\s+(\d+)\s+years|(\d+)[- ]years?\s+vesting", re.I)
@@ -228,5 +246,7 @@ def extract_structure(text: str) -> tuple[SalaryStructure, dict]:
         log.info("Falling back to heuristic extraction: %s", exc)
         structure, meta = _extract_heuristic(text)
     structure = _annualise_esop(structure, text)
+    if structure.retention_bonus > 0 and structure.retention_after_months <= 0:
+        structure = structure.model_copy(update={"retention_after_months": retention_months(text)})
     meta.update(location_defaults(structure.location))
     return structure, meta

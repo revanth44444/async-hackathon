@@ -28,15 +28,13 @@ def money(v: float) -> str:
     return f"{inr(v)} ({lakh(v)})" if abs(v) >= 1e5 else inr(v)
 
 
-def _inclusion(r: CalculationResult) -> tuple[bool, bool]:
-    items = {c.key: c.in_ctc for c in r.components}
-    return items.get("joining_bonus", False), items.get("esop_value", False)
+def _in_ctc(r: CalculationResult, key: str) -> bool:
+    return next((c.in_ctc for c in r.components if c.key == key), False)
 
 
 def rules(r: CalculationResult) -> list[str]:
     """Plain statements of the tax rules that apply, so the model doesn't improvise tax law."""
     s, a = r.structure, r.assumptions
-    joining_in, esop_in = _inclusion(r)
     out = [
         f"Tax year FY 2025-26. Figures use the {r.selected_regime} regime; the {r.recommended_regime} regime costs less for this offer.",
         f"New regime: standard deduction {inr(STANDARD_DEDUCTION['new'])}. HRA is fully taxable. There is no HRA exemption, "
@@ -46,11 +44,13 @@ def rules(r: CalculationResult) -> list[str]:
         "Whenever you mention HRA, name the regime: it is fully taxable under the new regime, but under the old regime "
         "part of it can be tax-free if you pay rent. Never call HRA simply 'tax-exempt' or 'fully taxable', and never "
         "say rent gives no tax benefit without adding that the old regime allows an HRA exemption.",
+        "Monthly in-hand covers fixed pay only. Variable pay is paid yearly, so annual take-home is more than 12 times "
+        "the monthly in-hand. Never say the annual figure 'translates to' or 'works out to' the monthly figure.",
     ]
     hra_ex = next((x.amount for x in r.regimes["old"].tax.exemptions if x.label.startswith("HRA")), 0)
     if s.hra > 0:
         out.append(
-            f"With the rent entered (₹{a.monthly_rent:,.0f} a month), the old-regime HRA exemption is {inr(hra_ex)}."
+            f"With the rent entered ({inr(a.monthly_rent)} a month), the old-regime HRA exemption is {inr(hra_ex)}."
             if a.monthly_rent > 0
             else "No rent has been entered, so no HRA exemption is applied in either regime."
         )
@@ -61,10 +61,17 @@ def rules(r: CalculationResult) -> list[str]:
     if s.gratuity > 0:
         out.append("Gratuity is paid only after 5 years of service. It is not part of monthly pay.")
     if s.joining_bonus > 0:
-        where = "included in the stated CTC" if joining_in else "outside the stated CTC"
-        out.append(f"The joining bonus is a one-time payment in year one, {where}. It is not monthly pay and is taxed in the year it is paid.")
+        where = "included in the stated CTC" if _in_ctc(r, "joining_bonus") else "outside the stated CTC"
+        out.append(f"The joining bonus is a one-time payment in year one, {where}. It is not monthly pay and is taxed in the year it is paid. "
+                   "Joining bonuses often must be repaid if you leave early: only say leaving early does not affect it "
+                   "if the offer letter explicitly says so.")
+    if s.retention_bonus > 0:
+        when = f"after {s.retention_after_months:g} months of service" if s.retention_after_months > 0 else "after a qualifying period of service"
+        out.append(f"The retention bonus of {inr(s.retention_bonus)} is not a joining bonus. It is paid only if you are still employed "
+                   f"{when}. If you leave before then, you receive none of it. "
+                   + ("It is included in year-one pay." if 0 < s.retention_after_months <= 12 else "It is not included in year-one pay."))
     if s.esop_value > 0:
-        where = "included in the stated CTC" if esop_in else "outside the stated CTC"
+        where = "included in the stated CTC" if _in_ctc(r, "esop_value") else "outside the stated CTC"
         out.append(f"ESOPs/RSUs are not cash ({where}). They are taxed only when exercised or vested.")
     if s.employer_pf > 0 or r.employee_pf > 0:
         out.append("Employee and employer PF go into your PF account, not your bank account.")
@@ -79,14 +86,16 @@ def facts(r: CalculationResult) -> dict:
         "role": r.structure.role,
         "stated_ctc": money(r.structure.ctc),
         "components": [
-            {"name": c.label, "per_year": money(c.annual)}
+            {"name": c.label}
+            | ({"one_time_amount": money(c.annual)} if c.category == "one_time" else {"per_year": money(c.annual)})
             | ({"per_month": inr(c.monthly)} if c.monthly is not None else {"note": "not paid monthly"})
+            | ({"condition": c.description} if c.key in ("retention_bonus", "gratuity") else {})
             | ({} if c.in_ctc else {"ctc": "outside the stated CTC"})
             for c in r.components
         ],
-        "monthly_in_hand": inr(r.monthly_in_hand),
-        "annual_take_home": money(r.annual_take_home),
-        "year_one_take_home_including_joining_bonus": money(r.year_one_take_home),
+        "monthly_in_hand_fixed_pay_only": inr(r.monthly_in_hand),
+        "annual_take_home_including_variable_pay": money(r.annual_take_home),
+        "year_one_take_home_including_one_time_bonuses_paid_in_year_one": money(r.year_one_take_home),
         "share_of_ctc_reaching_bank": f"{r.in_hand_pct_of_ctc * 100:.0f}%",
         "fixed_pay_before_deductions_per_year": money(r.fixed_cash),
         "variable_pay_target": money(r.structure.variable_pay),
@@ -260,6 +269,9 @@ def tradeoffs(labelled: list[tuple[str, CalculationResult]]) -> str:
             parts.append(f"ESOPs/RSUs of {inr(s.esop_value)} a year, not cash")
         if s.joining_bonus > 0:
             parts.append(f"a one-time joining bonus of {inr(s.joining_bonus)}")
+        if s.retention_bonus > 0:
+            when = f"after {s.retention_after_months:g} months" if s.retention_after_months > 0 else "later"
+            parts.append(f"a retention bonus of {inr(s.retention_bonus)}, paid {when} only if you stay")
         lines.append(f"- {label}: {'; '.join(parts)}.")
     return "\n".join(lines)
 

@@ -21,6 +21,8 @@ export interface SalaryStructure {
   insurance: number;
   variable_pay: number;
   joining_bonus: number;
+  retention_bonus: number;
+  retention_after_months: number;
   esop_value: number;
 }
 
@@ -115,7 +117,36 @@ export interface OfferSummary {
   ctc: number;
   monthly_in_hand: number;
   annual_take_home: number;
+  red_flag_score: number;
+  red_flag_level: RedFlagLevel;
   created_at: string;
+}
+
+export type RedFlagLevel = "Low risk" | "Some concerns" | "High risk";
+
+export interface RedFlag {
+  key: string;
+  title: string;
+  detail: string;
+  severity: "high" | "medium" | "low";
+}
+
+export interface RedFlagReport {
+  score: number;
+  level: RedFlagLevel;
+  flags: RedFlag[];
+}
+
+export interface NegotiationPoint {
+  key: string;
+  ask: string;
+  why: string;
+}
+
+export interface NegotiationEmail {
+  subject: string;
+  body: string;
+  method: "ai" | "template";
 }
 
 export interface ExtractionMeta {
@@ -136,6 +167,8 @@ export interface OfferDetail extends OfferSummary {
   extraction_meta: ExtractionMeta;
   explanation: string | null;
   suggestions: Suggestion[];
+  red_flags: RedFlagReport;
+  negotiation_points: NegotiationPoint[];
   has_raw_text: boolean;
 }
 
@@ -146,7 +179,7 @@ export interface SimulationResult {
 }
 
 export interface CompareResult {
-  rows: { offer_id: string; label: string; result: CalculationResult }[];
+  rows: { offer_id: string; label: string; result: CalculationResult; red_flags: RedFlagReport | null }[];
   best_monthly_in_hand: string;
   best_annual_take_home: string;
   best_year_one: string;
@@ -212,6 +245,8 @@ export const api = {
   explain: (id: string, refresh = false) =>
     post<{ explanation: string; method?: string }>(`/api/offers/${id}/explain?refresh=${refresh}`, {}),
   ask: (id: string, question: string) => post<{ answer: string }>(`/api/offers/${id}/ask`, { question }),
+  negotiationEmail: (id: string, body: { points: string[]; goal?: string; candidate_name?: string }) =>
+    post<NegotiationEmail>(`/api/offers/${id}/negotiation-email`, body),
   simulate: (offerId: string, assumptions: Assumptions, hikePct: number, overrides: Partial<Record<NumericField, number>>) =>
     post<SimulationResult>("/api/simulate", { offer_id: offerId, assumptions, hike_pct: hikePct, overrides }),
   compare: (offerIds: string[], assumptions?: Assumptions) =>

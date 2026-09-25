@@ -122,3 +122,69 @@ def test_gross_only_and_empty_letters():
         assert d["result"]["monthly_in_hand"] > 40_000
         r = c.post("/api/offers/text", json={"text": "Dear candidate, we are pleased to offer you a role. Compensation details will follow separately."})
         assert r.status_code == 422 and "CTC" in r.json()["detail"]
+
+
+# Fictional letter with a retention bonus, RSU grant, service bond and long notice period
+ORBITRA = """Offer of Employment - Orbitra Fintech Pvt Ltd, Hyderabad
+Your total Cost to Company is Rs. 22,00,000 per annum.
+Basic: Rs 75,000 per month
+HRA: Rs 30,000 per month
+Special Allowance: Rs 42,500 per month
+Employer PF: Rs 1,800 per month
+Gratuity: Rs 43,290
+Group Health Insurance premium: Rs 15,000
+Performance bonus (target, up to 15% of fixed): Rs 1,62,110
+Retention bonus of Rs 1,00,000 payable after completing 18 months.
+You will be granted RSUs worth Rs 8,00,000 vesting over 4 years.
+A service bond of 2 years applies; leaving earlier requires repayment of training costs of Rs 2,00,000. Notice period is 90 days."""
+
+
+def test_retention_bonus_is_conditional_and_not_in_year_one():
+    with TestClient(app, headers=ME) as c:
+        d = c.post("/api/offers/text", json={"text": ORBITRA}).json()
+        s, r = d["structure"], d["result"]
+        assert s["retention_bonus"] == 100_000 and s["retention_after_months"] == 18 and s["joining_bonus"] == 0
+        assert r["year_one_take_home"] == r["annual_take_home"]
+        comp = {x["key"]: x for x in r["components"]}
+        assert comp["retention_bonus"]["monthly"] is None and "18 months" in comp["retention_bonus"]["description"]
+        assert comp["gratuity"]["monthly"] is None
+        assert s["esop_value"] == 200_000
+        assert any("more than the stated CTC" in w for w in r["warnings"])
+
+
+def test_red_flags_and_negotiation_email():
+    with TestClient(app, headers=ME) as c:
+        d = c.post("/api/offers/text", json={"text": ORBITRA}).json()
+        keys = {f["key"] for f in d["red_flags"]["flags"]}
+        assert {"service_bond", "notice_period", "retention_conditional", "esop_in_ctc", "ctc_mismatch"} <= keys
+        assert 0 <= d["red_flags"]["score"] < 80 and d["red_flag_score"] == d["red_flags"]["score"]
+        points = {p["key"] for p in d["negotiation_points"]}
+        assert {"fixed_pay", "service_bond", "notice_period", "retention_schedule"} <= points
+        e = c.post(f"/api/offers/{d['id']}/negotiation-email",
+                   json={"points": ["service_bond", "notice_period"], "candidate_name": "Asha"}).json()
+        assert e["method"] == "template" and "Asha" in e["body"]
+        assert "service bond" in e["body"] and "notice period" in e["body"] and "fixed pay" not in e["body"]
+        listed = next(o for o in c.get("/api/offers").json() if o["id"] == d["id"])
+        assert listed["red_flag_level"] == d["red_flags"]["level"]
+        other = TestClient(app, headers=OTHER)
+        assert other.post(f"/api/offers/{d['id']}/negotiation-email", json={}).status_code == 404
+
+
+def test_loading_a_sample_twice_reuses_it():
+    with TestClient(app, headers={"X-Client-Id": "test-client-cccccccccccc"}) as c:
+        first = c.post("/api/offers/sample/quantora").json()
+        again = c.post("/api/offers/sample/quantora").json()
+        assert first["id"] == again["id"]
+        assert first["structure"]["esop_value"] == 636_000
+
+
+def test_stale_esop_grant_is_corrected_on_read():
+    from app.db import SessionLocal
+    from app.models import Offer
+    with TestClient(app, headers=ME) as c:
+        d = c.post("/api/offers/text", json={"text": ORBITRA}).json()
+        with SessionLocal() as db:  # simulate an offer saved before the ESOP fix
+            o = db.get(Offer, d["id"])
+            o.structure = {**o.structure, "esop_value": 800_000}
+            db.commit()
+        assert c.get(f"/api/offers/{d['id']}").json()["structure"]["esop_value"] == 200_000

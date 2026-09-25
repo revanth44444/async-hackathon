@@ -44,6 +44,7 @@ export const BUCKET_COLORS = [
   "#a9bccd", // insurance — mist blue
   "#e2ddd3", // variable not paid — sand
   "#8a5a44", // joining bonus — cognac
+  "#b08d57", // retention bonus — brass
   "#6e3b4a", // ESOPs — burgundy
   "#d9c9c9", // unallocated — blush grey
 ];

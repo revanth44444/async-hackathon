@@ -16,6 +16,7 @@ const BUCKET_ORDER = [
   "Insurance & benefits",
   "Variable not paid out",
   "Joining bonus (one-time)",
+  "Retention bonus (conditional)",
   "ESOPs / RSUs",
   "Unallocated",
 ];

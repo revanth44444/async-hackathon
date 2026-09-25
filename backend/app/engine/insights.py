@@ -1,7 +1,8 @@
 """Simulations, deterministic tax-saving suggestions and offer comparison."""
 from pydantic import BaseModel
 
-from app.engine.calculator import calculate
+from app.engine.calculator import calculate, inr
+from app.engine.flags import RedFlagReport
 from app.engine.schemas import Assumptions, CalculationResult, SalaryStructure
 
 CASH_FIELDS = ("basic", "hra", "special_allowance", "lta", "meal_allowance", "other_allowances")
@@ -76,7 +77,7 @@ def suggestions(s: SalaryStructure, a: Assumptions) -> list[Suggestion]:
             out.append(
                 Suggestion(
                     title="Ask HR for the corporate NPS option",
-                    detail=f"Moving ₹{room:,.0f}/yr of special allowance into employer NPS saves about ₹{saved:,.0f} in tax. "
+                    detail=f"Moving {inr(room)} a year of special allowance into employer NPS saves about {inr(saved)} in tax. "
                     "The money is locked in until retirement.",
                     annual_impact=round(saved, 2),
                 )
@@ -93,7 +94,7 @@ def suggestions(s: SalaryStructure, a: Assumptions) -> list[Suggestion]:
                 out.append(
                     Suggestion(
                         title="Fill your 80C limit (old regime)",
-                        detail=f"Investing another ₹{room_80c:,.0f} in ELSS/PPF would cut old-regime tax by about ₹{saved:,.0f}.",
+                        detail=f"Investing another {inr(room_80c)} in ELSS/PPF would cut old-regime tax by about {inr(saved)}.",
                         annual_impact=round(saved, 2),
                     )
                 )
@@ -114,6 +115,7 @@ class CompareRow(BaseModel):
     offer_id: str
     label: str
     result: CalculationResult
+    red_flags: RedFlagReport | None = None
 
 
 class CompareResult(BaseModel):
@@ -132,7 +134,7 @@ class CompareResult(BaseModel):
         return {
             "Highest guaranteed monthly in-hand (after tax and PF)": label[self.best_monthly_in_hand],
             "Highest annual take-home if variable pay is paid as assumed": label[self.best_annual_take_home],
-            "Highest year-one take-home including joining bonus": label[self.best_year_one],
+            "Highest year-one take-home including one-time bonuses": label[self.best_year_one],
             "Highest fixed pay before tax and PF": label[self.best_fixed_pay],
             "Most retirement savings (PF + NPS)": label[self.best_retirement],
             "Lowest income tax": label[self.lowest_tax],

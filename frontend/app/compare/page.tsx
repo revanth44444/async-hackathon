@@ -15,7 +15,7 @@ const METRICS: Metric[] = [
   { label: "Stated CTC", get: (r) => r.structure.ctc, fmt: lakh },
   { label: "Guaranteed monthly in-hand", get: (r) => r.monthly_in_hand, best: "max" },
   { label: "Annual take-home, if bonus pays out", get: (r) => r.annual_take_home, best: "max" },
-  { label: "Year one, with joining bonus", get: (r) => r.year_one_take_home, best: "max" },
+  { label: "Year one, with one-time bonuses", get: (r) => r.year_one_take_home, best: "max" },
   { label: "Fixed pay before tax & PF", get: (r) => r.fixed_cash, best: "max" },
   { label: "Variable pay (target)", get: (r) => r.structure.variable_pay },
   { label: "Income tax", get: (r) => r.regimes[r.selected_regime].tax.total_tax, best: "min" },
@@ -141,6 +141,23 @@ function CompareInner() {
                     </tr>
                   );
                 })}
+                {data.rows.every((r) => r.red_flags) && (() => {
+                  const scores = data.rows.map((r) => r.red_flags!.score);
+                  const top = Math.max(...scores);
+                  return (
+                    <tr className="border-t border-line align-top">
+                      <td className="py-4 pr-4 text-muted">Red-flag score (higher is safer)</td>
+                      {data.rows.map((r, i) => (
+                        <td key={r.offer_id} className={`py-4 text-right ${scores[i] === top && new Set(scores).size > 1 ? "text-good" : ""}`}>
+                          <span className="tabular">{r.red_flags!.score}/100</span>
+                          <span className="mt-1 block text-xs text-muted">
+                            {r.red_flags!.flags.length === 0 ? "No red flags" : r.red_flags!.flags.slice(0, 2).map((f) => f.title).join(" · ")}
+                          </span>
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })()}
               </tbody>
             </table>
           </div>
