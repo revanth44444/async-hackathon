@@ -1,4 +1,5 @@
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
@@ -7,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db import get_db
+from app.deps import client_id
 from app.engine.calculator import calculate
 from app.engine.insights import Suggestion, suggestions
 from app.engine.schemas import Assumptions, CalculationResult, SalaryStructure
@@ -20,7 +22,7 @@ router = APIRouter(prefix="/api/offers", tags=["offers"])
 
 
 class OfferSummary(BaseModel):
-    id: int
+    id: str
     label: str
     company: str | None
     role: str | None
@@ -101,14 +103,18 @@ def _apply(o: Offer, s: SalaryStructure, a: Assumptions) -> None:
     o.explanation = None  # numbers changed, so the old explanation is stale
 
 
-def _get(db: Session, offer_id: int) -> Offer:
+SAMPLES = {"nimbus": "nimbus_offer.pdf", "quantora": "quantora_offer.pdf"}
+SAMPLES_DIR = Path(__file__).resolve().parents[2] / "samples"
+
+
+def _get(db: Session, offer_id: str, owner: str) -> Offer:
     o = db.get(Offer, offer_id)
-    if not o:
+    if not o or o.owner_id != owner:  # same 404 either way, so IDs can't be probed
         raise HTTPException(404, "Offer not found")
     return o
 
 
-def _create_from_text(db: Session, text: str, source: str, label: str | None, filename: str | None) -> Offer:
+def _create_from_text(db: Session, owner: str, text: str, source: str, label: str | None, filename: str | None) -> Offer:
     structure, meta = extract_structure(text)
     if structure.ctc <= 0 and structure.basic <= 0 and structure.special_allowance <= 0:
         raise HTTPException(422, "Couldn't find salary figures in this document. Try entering the components manually.")
@@ -116,6 +122,7 @@ def _create_from_text(db: Session, text: str, source: str, label: str | None, fi
     a = Assumptions(state=meta.get("state") or "KA", metro=meta.get("metro", False))
     default_label = " · ".join(x for x in (structure.company, structure.role) if x) or (filename or "Untitled offer")
     o = Offer(
+        owner_id=owner,
         label=label or default_label,
         source=source,
         filename=filename,
@@ -129,12 +136,18 @@ def _create_from_text(db: Session, text: str, source: str, label: str | None, fi
 
 
 @router.get("", response_model=list[OfferSummary])
-def list_offers(db: Session = Depends(get_db)):
-    return [_summary(o) for o in db.scalars(select(Offer).order_by(Offer.created_at.desc()))]
+def list_offers(owner: str = Depends(client_id), db: Session = Depends(get_db)):
+    q = select(Offer).where(Offer.owner_id == owner).order_by(Offer.created_at.desc())
+    return [_summary(o) for o in db.scalars(q)]
 
 
 @router.post("/upload", response_model=OfferDetail, status_code=201)
-async def upload_offer(file: UploadFile = File(...), label: str | None = Form(None), db: Session = Depends(get_db)):
+async def upload_offer(
+    file: UploadFile = File(...),
+    label: str | None = Form(None),
+    owner: str = Depends(client_id),
+    db: Session = Depends(get_db),
+):
     data = await file.read()
     if len(data) > settings.max_upload_mb * 1024 * 1024:
         raise HTTPException(413, f"File too large (max {settings.max_upload_mb} MB)")
@@ -148,19 +161,29 @@ async def upload_offer(file: UploadFile = File(...), label: str | None = Form(No
             raise HTTPException(422, str(exc)) from exc
     else:
         raise HTTPException(415, "Upload a PDF or .txt offer letter")
-    return _detail(_create_from_text(db, text, "pdf", label, name))
+    # The PDF bytes are only held in memory for this request; just the extracted text is stored
+    return _detail(_create_from_text(db, owner, text, "pdf", label, name))
 
 
 @router.post("/text", response_model=OfferDetail, status_code=201)
-def create_from_text(body: TextCreate, db: Session = Depends(get_db)):
-    return _detail(_create_from_text(db, body.text, "text", body.label, None))
+def create_from_text(body: TextCreate, owner: str = Depends(client_id), db: Session = Depends(get_db)):
+    return _detail(_create_from_text(db, owner, body.text, "text", body.label, None))
+
+
+@router.post("/sample/{name}", response_model=OfferDetail, status_code=201)
+def create_sample(name: str, owner: str = Depends(client_id), db: Session = Depends(get_db)):
+    """Loads one of the fictional demo letters into this visitor's private space."""
+    if name not in SAMPLES:
+        raise HTTPException(404, "Unknown sample")
+    text = extract_text((SAMPLES_DIR / SAMPLES[name]).read_bytes())
+    return _detail(_create_from_text(db, owner, text, "sample", None, SAMPLES[name]))
 
 
 @router.post("", response_model=OfferDetail, status_code=201)
-def create_manual(body: ManualCreate, db: Session = Depends(get_db)):
+def create_manual(body: ManualCreate, owner: str = Depends(client_id), db: Session = Depends(get_db)):
     s = body.structure
     record_activity(db)
-    o = Offer(label=body.label or s.company or "Manual offer", source="manual", extraction_meta={"method": "manual"})
+    o = Offer(owner_id=owner, label=body.label or s.company or "Manual offer", source="manual", extraction_meta={"method": "manual"})
     _apply(o, s, body.assumptions)
     db.add(o)
     db.commit()
@@ -168,13 +191,13 @@ def create_manual(body: ManualCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/{offer_id}", response_model=OfferDetail)
-def get_offer(offer_id: int, db: Session = Depends(get_db)):
-    return _detail(_get(db, offer_id))
+def get_offer(offer_id: str, owner: str = Depends(client_id), db: Session = Depends(get_db)):
+    return _detail(_get(db, offer_id, owner))
 
 
 @router.put("/{offer_id}", response_model=OfferDetail)
-def update_offer(offer_id: int, body: OfferUpdate, db: Session = Depends(get_db)):
-    o = _get(db, offer_id)
+def update_offer(offer_id: str, body: OfferUpdate, owner: str = Depends(client_id), db: Session = Depends(get_db)):
+    o = _get(db, offer_id, owner)
     if body.label:
         o.label = body.label
     if body.structure or body.assumptions:
@@ -188,14 +211,14 @@ def update_offer(offer_id: int, body: OfferUpdate, db: Session = Depends(get_db)
 
 
 @router.delete("/{offer_id}", status_code=204)
-def delete_offer(offer_id: int, db: Session = Depends(get_db)):
-    db.delete(_get(db, offer_id))
+def delete_offer(offer_id: str, owner: str = Depends(client_id), db: Session = Depends(get_db)):
+    db.delete(_get(db, offer_id, owner))
     db.commit()
 
 
 @router.post("/{offer_id}/explain")
-def explain(offer_id: int, refresh: bool = False, db: Session = Depends(get_db)):
-    o = _get(db, offer_id)
+def explain(offer_id: str, refresh: bool = False, owner: str = Depends(client_id), db: Session = Depends(get_db)):
+    o = _get(db, offer_id, owner)
     if o.explanation and not refresh:
         return {"explanation": o.explanation, "cached": True}
     text, method = explain_offer(CalculationResult(**o.result), (o.extraction_meta or {}).get("notes"))
@@ -206,6 +229,6 @@ def explain(offer_id: int, refresh: bool = False, db: Session = Depends(get_db))
 
 
 @router.post("/{offer_id}/ask")
-def ask(offer_id: int, body: Question, db: Session = Depends(get_db)):
-    o = _get(db, offer_id)
+def ask(offer_id: str, body: Question, owner: str = Depends(client_id), db: Session = Depends(get_db)):
+    o = _get(db, offer_id, owner)
     return {"answer": answer_question(CalculationResult(**o.result), body.question, o.raw_text)}

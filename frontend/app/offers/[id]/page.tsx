@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { CtcDonut } from "@/components/charts";
 import { AskBox, BreakdownEditor, Explanation, LetterNotes, RegimePanel, StatRow, Suggestions, Warnings } from "@/components/OfferSections";
 import { Simulator } from "@/components/Simulator";
@@ -11,11 +11,12 @@ import { inr, lakh } from "@/lib/format";
 
 export default function OfferPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const [offer, setOffer] = useState<OfferDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.getOffer(Number(id)).then(setOffer, (e) => setError(e.message));
+    api.getOffer(id).then(setOffer, (e) => setError(e.message));
   }, [id]);
 
   if (error)
@@ -42,9 +43,20 @@ export default function OfferPage() {
             <Link href="/" className="text-[11px] uppercase tracking-[0.22em] text-white/50 transition hover:text-white">
               ← All offers
             </Link>
-            <Link href={`/compare?ids=${offer.id}`} className="link-cta text-white/70">
-              Compare
-            </Link>
+            <div className="flex items-center gap-8">
+              <Link href={`/compare?ids=${offer.id}`} className="link-cta text-white/70">
+                Compare
+              </Link>
+              <button
+                className="link-cta text-white/40 hover:text-white"
+                onClick={async () => {
+                  await api.deleteOffer(offer.id);
+                  router.push("/");
+                }}
+              >
+                Delete
+              </button>
+            </div>
           </div>
           <p className="rise eyebrow mt-16 !text-white/50">{meta || "Offer"}</p>
           <h1 className="rise-2 serif mt-4 text-4xl sm:text-6xl">{offer.structure.company ?? offer.label}</h1>
@@ -54,6 +66,7 @@ export default function OfferPage() {
                 {inr(r.monthly_in_hand)}
               </p>
               <p className="mt-4 text-white/55">a month, in hand, out of a {lakh(r.structure.ctc)} CTC.</p>
+              <p className="mt-2 text-xs text-white/35">Only this browser can see this offer.</p>
             </div>
             {offer.structure.joining_bonus > 0 && (
               <p className="text-sm text-white/55 sm:text-right">

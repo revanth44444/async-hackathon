@@ -27,7 +27,7 @@ const METRICS: Metric[] = [
 function CompareInner() {
   const params = useSearchParams();
   const [offers, setOffers] = useState<OfferSummary[] | null>(null);
-  const [selected, setSelected] = useState<number[]>(() => (params.get("ids") ?? "").split(",").map(Number).filter(Boolean));
+  const [selected, setSelected] = useState<string[]>(() => (params.get("ids") ?? "").split(",").filter(Boolean));
   const [data, setData] = useState<CompareResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,7 +36,7 @@ function CompareInner() {
     api.listOffers().then(setOffers, (e) => setError(e.message));
   }, []);
 
-  function toggle(id: number) {
+  function toggle(id: string) {
     setData(null);
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : s.length >= 4 ? s : [...s, id]));
   }

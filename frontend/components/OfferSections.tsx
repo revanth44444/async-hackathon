@@ -261,7 +261,7 @@ function Row({ label, value, muted }: { label: string; value: number; muted?: bo
   );
 }
 
-export function Explanation({ offerId, initial }: { offerId: number; initial: string | null }) {
+export function Explanation({ offerId, initial }: { offerId: string; initial: string | null }) {
   const [text, setText] = useState(initial);
   const [method, setMethod] = useState<string | undefined>(initial ? "ai" : undefined);
   const [busy, setBusy] = useState(false);
@@ -314,7 +314,7 @@ const QUICK_QUESTIONS = [
   "Why is gratuity in my CTC?",
 ];
 
-export function AskBox({ offerId }: { offerId: number }) {
+export function AskBox({ offerId }: { offerId: string }) {
   const [q, setQ] = useState("");
   const [thread, setThread] = useState<{ q: string; a: string | null }[]>([]);
 

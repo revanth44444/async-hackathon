@@ -1,3 +1,4 @@
+import secrets
 from datetime import datetime, timezone
 
 from sqlalchemy import JSON, DateTime, Integer, String, Text
@@ -10,10 +11,17 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class Offer(Base):
-    __tablename__ = "offers"
+def _public_id() -> str:
+    """Unguessable offer ID for URLs (16 URL-safe chars, ~96 bits)."""
+    return secrets.token_urlsafe(12)
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+class Offer(Base):
+    # "offers" held the pre-privacy schema (integer IDs, no owner); this table replaces it
+    __tablename__ = "offer_records"
+
+    id: Mapped[str] = mapped_column(String(24), primary_key=True, default=_public_id)
+    owner_id: Mapped[str] = mapped_column(String(64), index=True)
     label: Mapped[str] = mapped_column(String(200))
     company: Mapped[str | None] = mapped_column(String(200))
     role: Mapped[str | None] = mapped_column(String(200))

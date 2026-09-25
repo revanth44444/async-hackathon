@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db import get_db
+from app.deps import client_id
 from app.engine import tax as rules
 from app.engine.calculator import calculate
 from app.engine.insights import CompareResult, CompareRow, SimulationResult, compare_metrics, simulate
@@ -21,7 +22,7 @@ class CalcRequest(BaseModel):
 
 
 class SimulateRequest(BaseModel):
-    offer_id: int | None = None
+    offer_id: str | None = None
     structure: SalaryStructure | None = None  # used when offer_id is not given
     assumptions: Assumptions = Field(default_factory=Assumptions)
     hike_pct: float = Field(0, ge=-50, le=300)
@@ -29,7 +30,7 @@ class SimulateRequest(BaseModel):
 
 
 class CompareRequest(BaseModel):
-    offer_ids: list[int] = Field(min_length=2, max_length=4)
+    offer_ids: list[str] = Field(min_length=2, max_length=4)
     assumptions: Assumptions | None = None  # apply the same assumptions to all offers for a fair comparison
     ai_verdict: bool = True
 
@@ -50,10 +51,10 @@ def calc(body: CalcRequest):
 
 
 @router.post("/simulate", response_model=SimulationResult)
-def simulate_endpoint(body: SimulateRequest, db: Session = Depends(get_db)):
+def simulate_endpoint(body: SimulateRequest, owner: str = Depends(client_id), db: Session = Depends(get_db)):
     if body.offer_id is not None:
         o = db.get(Offer, body.offer_id)
-        if not o:
+        if not o or o.owner_id != owner:
             raise HTTPException(404, "Offer not found")
         s, base_a = SalaryStructure(**o.structure), Assumptions(**o.assumptions)
     elif body.structure:
@@ -67,12 +68,12 @@ def simulate_endpoint(body: SimulateRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/compare", response_model=CompareResult)
-def compare(body: CompareRequest, db: Session = Depends(get_db)):
+def compare(body: CompareRequest, owner: str = Depends(client_id), db: Session = Depends(get_db)):
     rows: list[CompareRow] = []
     for oid in dict.fromkeys(body.offer_ids):
         o = db.get(Offer, oid)
-        if not o:
-            raise HTTPException(404, f"Offer {oid} not found")
+        if not o or o.owner_id != owner:
+            raise HTTPException(404, "Offer not found")
         a = body.assumptions or Assumptions(**o.assumptions)
         rows.append(CompareRow(offer_id=o.id, label=o.label, result=calculate(SalaryStructure(**o.structure), a)))
     if len(rows) < 2:

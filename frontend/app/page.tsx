@@ -21,7 +21,7 @@ export default function Home() {
     api.listOffers().then(setOffers, () => setOffers([]));
   }, []);
 
-  async function remove(id: number) {
+  async function remove(id: string) {
     await api.deleteOffer(id);
     setOffers((o) => o?.filter((x) => x.id !== id) ?? null);
   }
@@ -87,7 +87,7 @@ export default function Home() {
           <div>
             <p className="eyebrow">Library</p>
             <h2 className="serif mt-3 text-3xl sm:text-4xl">Your offers</h2>
-            <p className="mt-2 text-sm text-muted">Shared demo space. Cleared automatically after every 50 uploads or comparisons.</p>
+            <p className="mt-2 text-sm text-muted">Visible only in this browser. Cleared automatically after every 50 uploads or comparisons.</p>
           </div>
           {offers && offers.length >= 2 && (
             <Link href="/compare" className="link-cta">

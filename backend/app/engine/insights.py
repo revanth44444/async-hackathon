@@ -111,16 +111,16 @@ def suggestions(s: SalaryStructure, a: Assumptions) -> list[Suggestion]:
 
 
 class CompareRow(BaseModel):
-    offer_id: int
+    offer_id: str
     label: str
     result: CalculationResult
 
 
 class CompareResult(BaseModel):
     rows: list[CompareRow]
-    best_monthly_in_hand: int
-    best_annual_take_home: int
-    best_year_one: int
+    best_monthly_in_hand: str
+    best_annual_take_home: str
+    best_year_one: str
     verdict: str | None = None
 
 

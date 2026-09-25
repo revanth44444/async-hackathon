@@ -192,6 +192,25 @@ export function NewOffer() {
         )}
 
         {error && <p className="mt-6 border-l border-bad pl-4 text-sm text-bad">{error}</p>}
+
+        {tab === "upload" && (
+          <p className="mt-6 text-sm text-muted">
+            No letter handy? Try a fictional sample:{" "}
+            <button className="underline underline-offset-4 hover:text-ink" disabled={busy} onClick={() => run(() => api.loadSample("nimbus"))}>
+              Nimbus Cloud
+            </button>{" "}
+            or{" "}
+            <button className="underline underline-offset-4 hover:text-ink" disabled={busy} onClick={() => run(() => api.loadSample("quantora"))}>
+              Quantora Labs
+            </button>
+          </p>
+        )}
+
+        <p className="mt-8 border-t border-line pt-5 text-xs leading-relaxed text-muted">
+          <span className="text-ink/80">Private by design.</span> Your PDF is read in memory and never stored. We keep
+          only the extracted text and figures, visible only in this browser. You can delete them any time, and everything
+          is cleared automatically after every 50 uploads or comparisons.
+        </p>
       </div>
     </div>
   );

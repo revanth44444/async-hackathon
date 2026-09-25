@@ -1,3 +1,5 @@
+import { getClientId } from "@/lib/client-id";
+
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export type Regime = "new" | "old";
@@ -104,11 +106,11 @@ export interface Suggestion {
 }
 
 export interface OfferSummary {
-  id: number;
+  id: string;
   label: string;
   company: string | null;
   role: string | null;
-  source: "pdf" | "text" | "manual";
+  source: "pdf" | "text" | "manual" | "sample";
   ctc: number;
   monthly_in_hand: number;
   annual_take_home: number;
@@ -141,10 +143,10 @@ export interface SimulationResult {
 }
 
 export interface CompareResult {
-  rows: { offer_id: number; label: string; result: CalculationResult }[];
-  best_monthly_in_hand: number;
-  best_annual_take_home: number;
-  best_year_one: number;
+  rows: { offer_id: string; label: string; result: CalculationResult }[];
+  best_monthly_in_hand: string;
+  best_annual_take_home: string;
+  best_year_one: string;
   verdict: string | null;
 }
 
@@ -166,7 +168,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     res = await fetch(`${API_URL}${path}`, {
       ...init,
-      headers: init?.body instanceof FormData ? init.headers : { "Content-Type": "application/json", ...init?.headers },
+      headers: {
+        ...(init?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+        "X-Client-Id": getClientId(),
+        ...init?.headers,
+      },
     });
   } catch {
     throw new ApiError(`Can't reach the API at ${API_URL}. Is the backend running?`, 0);
@@ -184,23 +190,24 @@ const post = <T>(path: string, body: unknown) => request<T>(path, { method: "POS
 export const api = {
   meta: () => request<Meta>("/api/meta"),
   listOffers: () => request<OfferSummary[]>("/api/offers"),
-  getOffer: (id: number) => request<OfferDetail>(`/api/offers/${id}`),
+  getOffer: (id: string) => request<OfferDetail>(`/api/offers/${id}`),
   uploadOffer: (file: File) => {
     const fd = new FormData();
     fd.append("file", file);
     return request<OfferDetail>("/api/offers/upload", { method: "POST", body: fd });
   },
+  loadSample: (name: "nimbus" | "quantora") => post<OfferDetail>(`/api/offers/sample/${name}`, {}),
   createFromText: (text: string) => post<OfferDetail>("/api/offers/text", { text }),
   createManual: (structure: Partial<SalaryStructure>, assumptions?: Partial<Assumptions>, label?: string) =>
     post<OfferDetail>("/api/offers", { structure, assumptions, label }),
-  updateOffer: (id: number, body: { label?: string; structure?: SalaryStructure; assumptions?: Assumptions }) =>
+  updateOffer: (id: string, body: { label?: string; structure?: SalaryStructure; assumptions?: Assumptions }) =>
     request<OfferDetail>(`/api/offers/${id}`, { method: "PUT", body: JSON.stringify(body) }),
-  deleteOffer: (id: number) => request<void>(`/api/offers/${id}`, { method: "DELETE" }),
-  explain: (id: number, refresh = false) =>
+  deleteOffer: (id: string) => request<void>(`/api/offers/${id}`, { method: "DELETE" }),
+  explain: (id: string, refresh = false) =>
     post<{ explanation: string; method?: string }>(`/api/offers/${id}/explain?refresh=${refresh}`, {}),
-  ask: (id: number, question: string) => post<{ answer: string }>(`/api/offers/${id}/ask`, { question }),
-  simulate: (offerId: number, assumptions: Assumptions, hikePct: number, overrides: Partial<Record<NumericField, number>>) =>
+  ask: (id: string, question: string) => post<{ answer: string }>(`/api/offers/${id}/ask`, { question }),
+  simulate: (offerId: string, assumptions: Assumptions, hikePct: number, overrides: Partial<Record<NumericField, number>>) =>
     post<SimulationResult>("/api/simulate", { offer_id: offerId, assumptions, hike_pct: hikePct, overrides }),
-  compare: (offerIds: number[], assumptions?: Assumptions) =>
+  compare: (offerIds: string[], assumptions?: Assumptions) =>
     post<CompareResult>("/api/compare", { offer_ids: offerIds, assumptions }),
 };
