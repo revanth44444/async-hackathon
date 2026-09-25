@@ -44,9 +44,10 @@ export interface LineItem {
   key: NumericField;
   label: string;
   annual: number;
-  monthly: number;
+  monthly: number | null;
   category: "fixed" | "retirement" | "benefit" | "variable" | "one_time" | "equity";
   description: string;
+  in_ctc: boolean;
 }
 
 export interface Adjustment {

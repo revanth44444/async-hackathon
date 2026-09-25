@@ -101,3 +101,17 @@ def test_ctc_mismatch_warns():
 def test_deterministic():
     s = SalaryStructure(basic=900_000, hra=450_000, special_allowance=300_000, variable_pay=150_000)
     assert calculate(s).model_dump() == calculate(s).model_dump()
+
+
+def test_one_time_items_have_no_monthly_figure_and_know_if_they_are_in_ctc():
+    # Joining bonus on top of an 18L CTC (outside), ESOPs inside a 25.77L CTC
+    nimbus = calculate(SalaryStructure(ctc=1_800_000, basic=720_000, special_allowance=1_080_000, joining_bonus=100_000))
+    jb = next(c for c in nimbus.components if c.key == "joining_bonus")
+    assert jb.monthly is None and jb.in_ctc is False
+    assert not nimbus.warnings
+
+    quantora = calculate(SalaryStructure(ctc=2_577_000, basic=1_000_000, special_allowance=941_000, esop_value=636_000))
+    esop = next(c for c in quantora.components if c.key == "esop_value")
+    assert esop.monthly is None and esop.in_ctc is True
+    assert any(b.label == "ESOPs / RSUs" for b in quantora.ctc_buckets)
+    assert sum(b.amount for b in quantora.ctc_buckets) == pytest.approx(2_577_000, abs=5)

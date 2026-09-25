@@ -48,6 +48,18 @@ def inr(v: float) -> str:
     return f"{sign}₹{s}"
 
 
+def ctc_inclusion(s: SalaryStructure, recurring_ctc: float) -> tuple[bool, bool]:
+    """Whether the stated CTC includes the joining bonus / ESOPs, inferred from the gap between the
+    stated CTC and the recurring components. Letters differ, so we check which combination fits."""
+    gap = s.ctc - recurring_ctc
+    tol = max(0.01 * s.ctc, 1)
+    for joining, esop in ((True, True), (True, False), (False, True)):
+        expected = (s.joining_bonus if joining else 0) + (s.esop_value if esop else 0)
+        if expected > 0 and abs(gap - expected) <= tol:
+            return joining and s.joining_bonus > 0, esop and s.esop_value > 0
+    return False, False
+
+
 def _employee_pf(s: SalaryStructure, a: Assumptions) -> float:
     if not a.include_employee_pf:
         return 0.0
@@ -139,7 +151,9 @@ def calculate(s: SalaryStructure, a: Assumptions | None = None) -> CalculationRe
     if s.ctc <= 0:
         s.ctc = recurring_ctc
     gap = s.ctc - recurring_ctc
-    if abs(gap) > 0.01 * s.ctc and abs(gap - s.joining_bonus - s.esop_value) > 0.01 * s.ctc:
+    joining_in, esop_in = ctc_inclusion(s, recurring_ctc)
+    unallocated = gap - (s.joining_bonus if joining_in else 0) - (s.esop_value if esop_in else 0)
+    if abs(unallocated) > 0.01 * s.ctc:
         warnings.append(
             f"Components add up to {inr(recurring_ctc)} but the stated CTC is {inr(s.ctc)}. "
             "Review the breakdown. Some components may be missing or misread."
@@ -174,14 +188,16 @@ def calculate(s: SalaryStructure, a: Assumptions | None = None) -> CalculationRe
     selected: Regime = recommended if a.regime == "auto" else a.regime
     chosen = regimes[selected]
 
+    in_ctc = {"joining_bonus": joining_in, "esop_value": esop_in}
     components = [
         LineItem(
             key=key,
             label=label,
             annual=round(getattr(s, key), 2),
-            monthly=round(getattr(s, key) / 12, 2),
+            monthly=None if cat in ("variable", "one_time", "equity") else round(getattr(s, key) / 12, 2),
             category=cat,
             description=desc,
+            in_ctc=in_ctc.get(key, True),
         )
         for key, label, cat, desc in COMPONENTS
         if getattr(s, key) > 0
@@ -198,7 +214,9 @@ def calculate(s: SalaryStructure, a: Assumptions | None = None) -> CalculationRe
         Bucket(label="Gratuity", amount=s.gratuity),
         Bucket(label="Insurance & benefits", amount=s.insurance),
         Bucket(label="Variable not paid out", amount=s.variable_pay - variable_paid),
-        Bucket(label="One-time / ESOPs / unallocated", amount=gap),
+        Bucket(label="Joining bonus (one-time)", amount=s.joining_bonus if joining_in else 0),
+        Bucket(label="ESOPs / RSUs", amount=s.esop_value if esop_in else 0),
+        Bucket(label="Unallocated", amount=unallocated),
     ]
     buckets = [Bucket(label=b.label, amount=round(b.amount, 2)) for b in buckets if b.amount > 0.5]
 

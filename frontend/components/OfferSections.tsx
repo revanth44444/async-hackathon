@@ -69,16 +69,25 @@ const EDITABLE: { key: NumericField; label: string; group: string }[] = [
   { key: "gratuity", label: "Gratuity", group: "Retirement" },
   { key: "employer_nps", label: "Employer NPS", group: "Retirement" },
   { key: "insurance", label: "Insurance & benefits", group: "Benefits" },
-  { key: "variable_pay", label: "Variable pay", group: "Variable & one-time" },
-  { key: "joining_bonus", label: "Joining bonus", group: "Variable & one-time" },
-  { key: "esop_value", label: "ESOPs per year", group: "Variable & one-time" },
+  { key: "variable_pay", label: "Variable pay", group: "Not paid monthly" },
+  { key: "joining_bonus", label: "Joining bonus", group: "Not paid monthly" },
+  { key: "esop_value", label: "ESOPs per year", group: "Not paid monthly" },
 ];
+
+/** Items that must never be shown as a monthly figure. */
+const NOT_MONTHLY: Partial<Record<NumericField, string>> = {
+  variable_pay: "Yearly",
+  joining_bonus: "One-time",
+  esop_value: "Vests yearly",
+};
 
 export function BreakdownEditor({ offer, onSaved }: { offer: OfferDetail; onSaved: (o: OfferDetail) => void }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<SalaryStructure>(offer.structure);
   const [saving, setSaving] = useState(false);
   const desc = Object.fromEntries(offer.result.components.map((c) => [c.key, c.description]));
+  const outsideCtc = new Set(offer.result.components.filter((c) => !c.in_ctc).map((c) => c.key));
+  const outsideTotal = offer.result.components.filter((c) => !c.in_ctc).reduce((sum, c) => sum + c.annual, 0);
   const rows = editing ? EDITABLE : EDITABLE.filter((f) => offer.structure[f.key] > 0);
   const groups = [...new Set(rows.map((r) => r.group))];
   const source =
@@ -153,8 +162,15 @@ export function BreakdownEditor({ offer, onSaved }: { offer: OfferDetail; onSave
                     <span title={desc[f.key]} className={desc[f.key] ? "cursor-help" : ""}>
                       {f.label}
                     </span>
+                    {!editing && NOT_MONTHLY[f.key] && offer.structure[f.key] > 0 && (
+                      <span className="ml-3 text-[10px] uppercase tracking-[0.18em] text-muted">
+                        {outsideCtc.has(f.key) ? "Outside CTC" : "In CTC"}
+                      </span>
+                    )}
                   </td>
-                  <td className="tabular py-3 text-right text-muted">{inr((editing ? draft : offer.structure)[f.key] / 12)}</td>
+                  <td className="tabular py-3 text-right text-muted">
+                    {NOT_MONTHLY[f.key] ?? inr((editing ? draft : offer.structure)[f.key] / 12)}
+                  </td>
                   <td className="py-3 text-right">
                     {editing ? (
                       <input
@@ -189,6 +205,13 @@ export function BreakdownEditor({ offer, onSaved }: { offer: OfferDetail; onSave
               )}
             </td>
           </tr>
+          {!editing && outsideTotal > 0 && (
+            <tr>
+              <td colSpan={3} className="pt-2 text-sm text-muted">
+                Plus {inr(outsideTotal)} outside the CTC ({[...outsideCtc].map((k) => EDITABLE.find((f) => f.key === k)?.label.toLowerCase()).join(", ")}).
+              </td>
+            </tr>
+          )}
         </tfoot>
       </table>
     </div>

@@ -28,23 +28,15 @@ def money(v: float) -> str:
     return f"{inr(v)} ({lakh(v)})" if abs(v) >= 1e5 else inr(v)
 
 
-def ctc_inclusion(r: CalculationResult) -> tuple[bool, bool]:
-    """Whether the stated CTC already includes the joining bonus / ESOPs (inferred from the gap)."""
-    s = r.structure
-    recurring = r.fixed_cash + s.employer_pf + s.gratuity + s.employer_nps + s.insurance + s.variable_pay
-    gap = s.ctc - recurring
-    tol = max(0.01 * s.ctc, 1)
-    for joining, esop in ((True, True), (True, False), (False, True)):
-        expected = (s.joining_bonus if joining else 0) + (s.esop_value if esop else 0)
-        if expected > 0 and abs(gap - expected) <= tol:
-            return joining and s.joining_bonus > 0, esop and s.esop_value > 0
-    return False, False
+def _inclusion(r: CalculationResult) -> tuple[bool, bool]:
+    items = {c.key: c.in_ctc for c in r.components}
+    return items.get("joining_bonus", False), items.get("esop_value", False)
 
 
 def rules(r: CalculationResult) -> list[str]:
     """Plain statements of the tax rules that apply, so the model doesn't improvise tax law."""
     s, a = r.structure, r.assumptions
-    joining_in, esop_in = ctc_inclusion(r)
+    joining_in, esop_in = _inclusion(r)
     out = [
         f"Tax year FY 2025-26. Figures use the {r.selected_regime} regime; the {r.recommended_regime} regime costs less for this offer.",
         f"New regime: standard deduction {inr(STANDARD_DEDUCTION['new'])}. HRA is fully taxable. There is no HRA exemption, "
@@ -79,15 +71,14 @@ def rules(r: CalculationResult) -> list[str]:
 def facts(r: CalculationResult) -> dict:
     """Every figure the model may use, pre-formatted. Nothing here needs further arithmetic."""
     sel = r.regimes[r.selected_regime]
-    one_time = {"joining_bonus", "esop_value"}
     return {
         "company": r.structure.company,
         "role": r.structure.role,
         "stated_ctc": money(r.structure.ctc),
         "components": [
             {"name": c.label, "per_year": money(c.annual)}
-            | ({} if c.key in one_time else {"per_month": inr(c.monthly)})
-            | ({"note": "one-time, not monthly"} if c.key in one_time else {})
+            | ({"per_month": inr(c.monthly)} if c.monthly is not None else {"note": "not paid monthly"})
+            | ({} if c.in_ctc else {"ctc": "outside the stated CTC"})
             for c in r.components
         ],
         "monthly_in_hand": inr(r.monthly_in_hand),

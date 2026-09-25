@@ -15,7 +15,9 @@ const BUCKET_ORDER = [
   "Gratuity",
   "Insurance & benefits",
   "Variable not paid out",
-  "One-time / ESOPs / unallocated",
+  "Joining bonus (one-time)",
+  "ESOPs / RSUs",
+  "Unallocated",
 ];
 export const bucketColor = (label: string) => BUCKET_COLORS[Math.max(0, BUCKET_ORDER.indexOf(label)) % BUCKET_COLORS.length];
 

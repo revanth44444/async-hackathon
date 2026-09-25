@@ -50,9 +50,10 @@ class LineItem(BaseModel):
     key: str
     label: str
     annual: float
-    monthly: float
+    monthly: float | None  # None for items that are not paid monthly (variable, one-time, equity)
     category: Literal["fixed", "retirement", "benefit", "variable", "one_time", "equity"]
     description: str
+    in_ctc: bool = True  # False for one-time items the stated CTC does not include
 
 
 class SlabRow(BaseModel):

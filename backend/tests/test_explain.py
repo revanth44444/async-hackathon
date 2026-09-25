@@ -22,7 +22,7 @@ def test_facts_are_preformatted_and_one_time_items_have_no_monthly_figure():
     f = facts(calculate(NIMBUS))
     assert f["annual_take_home"].startswith("₹14,") and "L)" in f["annual_take_home"]
     joining = next(c for c in f["components"] if c["name"] == "Joining Bonus")
-    assert "per_month" not in joining and "one-time" in joining["note"]
+    assert "per_month" not in joining and joining["ctc"] == "outside the stated CTC"
 
 
 def test_rules_state_hra_is_taxable_in_new_regime_and_joining_bonus_is_outside_ctc():
