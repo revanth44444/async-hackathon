@@ -43,6 +43,9 @@ def rules(r: CalculationResult) -> list[str]:
         "and 80C, 80D and home-loan deductions are not allowed. Only employer NPS (up to 14% of basic) is deductible.",
         f"Old regime: standard deduction {inr(STANDARD_DEDUCTION['old'])}. HRA is partly exempt only if you pay rent "
         "and claim it. The exempt part depends on rent paid, basic pay and the city.",
+        "Whenever you mention HRA, name the regime: it is fully taxable under the new regime, but under the old regime "
+        "part of it can be tax-free if you pay rent. Never call HRA simply 'tax-exempt' or 'fully taxable', and never "
+        "say rent gives no tax benefit without adding that the old regime allows an HRA exemption.",
     ]
     hra_ex = next((x.amount for x in r.regimes["old"].tax.exemptions if x.label.startswith("HRA")), 0)
     if s.hra > 0:
@@ -243,16 +246,18 @@ def answer_question(r: CalculationResult, question: str, raw_text: str | None) -
     return text or "I couldn't answer that reliably from the calculated figures. The breakdown on this page has the exact numbers."
 
 
-def compare_verdict(labelled: list[tuple[str, CalculationResult]], winners: dict[str, str]) -> str | None:
-    """`winners` maps each metric to the offer that leads on it (decided in Python, not by the model)."""
+def compare_verdict(labelled: list[tuple[str, CalculationResult]], winners: dict[str, str], suits: str) -> str | None:
+    """`winners` maps each metric to the offer that leads on it and `suits` is the closing recommendation;
+    both are decided in Python, not by the model."""
     data = {label: facts(r) for label, r in labelled}
     offer_rules = {label: rules(r) for label, r in labelled}
     prompt = (
         "Compare these offers for the candidate. Focus on guaranteed monthly in-hand pay, variable risk, "
         "long-term and non-cash value, and one-time bonuses. The WINNERS below are final. Never say an offer leads "
         "on a measure it does not win. If different offers win different measures, say so plainly and explain "
-        "the trade-off. End with which offer suits someone who values certainty and which suits someone "
-        "comfortable with variable pay. Max 200 words.\n\n"
+        "the trade-off. End with the CONCLUSION below. You may reword it, but never change which offer it names "
+        "for which kind of candidate. Max 200 words.\n\n"
+        f"CONCLUSION:\n{suits}\n\n"
         f"WINNERS:\n{json.dumps(winners, ensure_ascii=False)}\n\nDATA:\n{json.dumps(data, ensure_ascii=False)}\n\n"
         f"RULES:\n{json.dumps(offer_rules, ensure_ascii=False)}"
     )
@@ -267,7 +272,7 @@ def compare_verdict(labelled: list[tuple[str, CalculationResult]], winners: dict
         return None
 
 
-def winners_summary(winners: dict[str, str]) -> str:
+def winners_summary(winners: dict[str, str], suits: str) -> str:
     """Deterministic verdict used when the AI is unavailable or fails verification."""
     by_offer: dict[str, list[str]] = {}
     for metric, label in winners.items():
@@ -275,8 +280,6 @@ def winners_summary(winners: dict[str, str]) -> str:
     lines = ["### Where each offer leads\n"]
     lines += [f"- {label}: {'; '.join(metrics)}." for label, metrics in by_offer.items()]
     if len(by_offer) > 1:
-        lines.append(
-            "\nNo single offer wins on everything. If certainty matters most, weigh guaranteed monthly in-hand and fixed "
-            "pay. If you are comfortable with performance-linked pay, weigh the annual take-home with variable pay."
-        )
+        lines.append("\nNo single offer wins on everything.")
+    lines.append(f"\n{suits}")
     return "\n".join(lines)

@@ -31,3 +31,43 @@ def test_rules_state_hra_is_taxable_in_new_regime_and_joining_bonus_is_outside_c
     assert "HRA is fully taxable" in text
     assert "No rent has been entered" in text
     assert "outside the stated CTC" in text
+
+
+def test_inr_rounds_half_up_like_the_frontend():
+    assert inr(109_540.5) == "₹1,09,541"
+    assert inr(109_541.5) == "₹1,09,542"
+
+
+def test_rules_tie_hra_to_a_regime():
+    text = " ".join(rules(calculate(NIMBUS)))
+    assert "Whenever you mention HRA, name the regime" in text
+
+
+from app.engine.insights import CompareRow, compare_metrics  # noqa: E402
+
+QUANTORA = SalaryStructure(
+    ctc=1_941_000, basic=700_000, hra=350_000, special_allowance=430_200, employer_pf=84_000,
+    gratuity=33_670, variable_pay=315_000,
+)
+
+
+def _compare(*structs):
+    return compare_metrics([CompareRow(offer_id=str(i), label=f"Offer {i}", result=calculate(s)) for i, s in enumerate(structs)])
+
+
+def test_suitability_never_swaps_certainty_and_variable_pay():
+    res = _compare(NIMBUS, QUANTORA)
+    label = {r.offer_id: r.label for r in res.rows}
+    suits = res.suitability()
+    safe, upside = label[res.best_monthly_in_hand], label[res.best_annual_take_home]
+    if safe == upside:
+        assert suits.startswith(f"{safe} suits both")
+    else:
+        assert f"For certainty, {safe}" in suits and f"variable pay, {upside}" in suits
+
+
+def test_suitability_splits_when_different_offers_lead():
+    steady = SalaryStructure(ctc=1_500_000, basic=600_000, hra=300_000, special_allowance=528_000, employer_pf=72_000)
+    risky = SalaryStructure(ctc=2_000_000, basic=400_000, hra=200_000, special_allowance=352_000, employer_pf=48_000, variable_pay=1_000_000)
+    suits = _compare(steady, risky).suitability()
+    assert "For certainty, Offer 0" in suits and "variable pay, Offer 1" in suits

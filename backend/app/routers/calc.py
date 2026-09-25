@@ -80,7 +80,8 @@ def compare(body: CompareRequest, owner: str = Depends(client_id), db: Session =
         raise HTTPException(422, "Pick at least two different offers")
     result = compare_metrics(rows)
     if body.ai_verdict:
-        result.verdict = compare_verdict([(r.label, r.result) for r in rows], result.winners()) or winners_summary(result.winners())
+        winners, suits = result.winners(), result.suitability()
+        result.verdict = compare_verdict([(r.label, r.result) for r in rows], winners, suits) or winners_summary(winners, suits)
     record_activity(db)
     db.commit()
     return result

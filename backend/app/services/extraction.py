@@ -200,6 +200,25 @@ def _extract_heuristic(text: str) -> tuple[SalaryStructure, dict]:
     return _aggregate(data), meta
 
 
+VEST_RE = re.compile(r"(?:over|across)\s+(\d+)\s+years|(\d+)[- ]years?\s+vesting", re.I)
+
+
+def _annualise_esop(structure: SalaryStructure, text: str) -> SalaryStructure:
+    """The model sometimes returns the total grant ("₹25,44,000 vesting over 4 years") as esop_value, which is
+    shown as a per-year figure. If esop_value equals the largest amount in a sentence that states a vesting
+    period, divide it by that period."""
+    if structure.esop_value <= 0:
+        return structure
+    for seg in SEGMENT_RE.split(text):
+        low = seg.lower()
+        if not re.search(r"\besops?\b|\brsus?\b|stock", low) or not (m := VEST_RE.search(low)):
+            continue
+        amounts, years = _amounts(seg), int(m.group(1) or m.group(2))
+        if years > 1 and amounts and abs(max(amounts) - structure.esop_value) <= 1:
+            return structure.model_copy(update={"esop_value": structure.esop_value / years})
+    return structure
+
+
 def extract_structure(text: str) -> tuple[SalaryStructure, dict]:
     try:
         structure, meta = _extract_ai(text)
@@ -208,5 +227,6 @@ def extract_structure(text: str) -> tuple[SalaryStructure, dict]:
     except AIUnavailable as exc:
         log.info("Falling back to heuristic extraction: %s", exc)
         structure, meta = _extract_heuristic(text)
+    structure = _annualise_esop(structure, text)
     meta.update(location_defaults(structure.location))
     return structure, meta

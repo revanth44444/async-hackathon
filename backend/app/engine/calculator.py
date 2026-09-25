@@ -1,4 +1,6 @@
 """Deterministic CTC → take-home calculator. Same input always yields the same output."""
+import math
+
 from app.engine import tax as rules
 from app.engine.schemas import (
     Adjustment,
@@ -38,7 +40,8 @@ COMPONENTS: list[tuple[str, str, str, str]] = [
 
 def inr(v: float) -> str:
     """Indian digit grouping: 1234567 → ₹12,34,567."""
-    n = int(round(v))
+    # Round half up (like the frontend's Math.round), not Python's half-to-even: ₹1,09,540.5 → ₹1,09,541
+    n = math.floor(v + 0.5)
     sign, n = ("-" if n < 0 else ""), abs(n)
     s = str(n)
     if len(s) > 3:

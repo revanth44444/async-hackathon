@@ -138,6 +138,18 @@ class CompareResult(BaseModel):
             "Lowest income tax": label[self.lowest_tax],
         }
 
+    def suitability(self) -> str:
+        """Which offer suits a certainty-seeker vs someone comfortable with variable pay, decided here so the
+        model can't swap them. Certainty = most guaranteed monthly pay; variable comfort = most take-home
+        if variable pay pays out."""
+        label = {r.offer_id: r.label for r in self.rows}
+        safe, upside = label[self.best_monthly_in_hand], label[self.best_annual_take_home]
+        if safe == upside:
+            return (f"{safe} suits both a candidate who values certainty and one comfortable with variable pay: "
+                    "it leads on guaranteed monthly in-hand and on annual take-home with variable pay.")
+        return (f"For certainty, {safe}: it pays the most guaranteed monthly in-hand. "
+                f"For someone comfortable with variable pay, {upside}: it pays the most if variable pay is paid out.")
+
 
 def compare_metrics(rows: list[CompareRow]) -> CompareResult:
     def best(key, lowest=False):

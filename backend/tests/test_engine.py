@@ -159,3 +159,14 @@ def test_complete_letters_are_left_alone():
                            gratuity=34_632, insurance=17_912, variable_pay=160_000)
     s, est = complete_structure(full)
     assert est == [] and s == full
+
+
+from app.services.extraction import _annualise_esop  # noqa: E402
+
+
+def test_esop_total_grant_is_annualised():
+    text = "You will also be granted ESOPs worth Rs. 25,44,000 vesting over 4 years (25% per year, 1-year cliff)."
+    s = _annualise_esop(SalaryStructure(ctc=1_941_000, esop_value=2_544_000), text)
+    assert s.esop_value == 636_000
+    # Already annual: left alone
+    assert _annualise_esop(SalaryStructure(ctc=1_941_000, esop_value=636_000), text).esop_value == 636_000
