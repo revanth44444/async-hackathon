@@ -48,9 +48,14 @@ def negotiation_points(r: CalculationResult, report: RedFlagReport, tips: list[S
     if "retention_conditional" in flagged:
         out.append(NegotiationPoint(key="retention_schedule", ask="Ask whether the retention bonus can be paid in instalments.",
                                     why=f"The {inr(s.retention_bonus)} retention bonus is paid only if you are still employed at the date."))
-    if "notice_period" in flagged:
-        out.append(NegotiationPoint(key="notice_period", ask="Ask to reduce the notice period to 60 days.",
-                                    why="A long notice period can hold up a future move."))
+    days = report.notice_days
+    if days is not None and days >= 60:
+        target = 60 if days > 60 else 30  # never ask for what the letter already gives
+        out.append(NegotiationPoint(key="notice_period", ask=f"Ask to reduce the notice period to {target} days.",
+                                    why=f"The letter asks for {days} days, which can hold up a future move."))
+    if report.has_non_compete:
+        out.append(NegotiationPoint(key="non_compete", ask="Ask to narrow or remove the non-compete clause.",
+                                    why="It limits where you can work after leaving. Ask for a shorter duration and a clear list of competitors."))
     if "esop_in_ctc" in flagged:
         out.append(NegotiationPoint(key="esop_details", ask="Ask for the ESOP grant details: vesting schedule, strike price and exit terms.",
                                     why=f"{inr(s.esop_value)} a year of the CTC is equity, not cash."))

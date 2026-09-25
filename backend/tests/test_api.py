@@ -188,3 +188,48 @@ def test_stale_esop_grant_is_corrected_on_read():
             o.structure = {**o.structure, "esop_value": 800_000}
             db.commit()
         assert c.get(f"/api/offers/{d['id']}").json()["structure"]["esop_value"] == 200_000
+
+
+# Fictional letter: 60-day notice, non-compete, joining bonus clawback
+KESTREL = """Letter of Offer - Kestrel Retail Pvt Ltd, Mumbai
+Dear Rohan Mehta, we are delighted to offer you the position of Associate Consultant.
+Annual CTC: Rs 9,60,000
+Basic Salary: 3,84,000
+House Rent Allowance: 1,92,000
+Meal Coupons: 26,400
+Special Allowance: 2,57,530
+Employer Contribution to PF: 21,600
+Gratuity: 18,470
+Annual Performance Incentive (target): 60,000
+In addition, you will receive a one-time joining bonus of Rs 75,000 with your first salary. The joining bonus is recoverable in full if you resign within 12 months of joining.
+Notice period: 2 months. You agree to a non-compete for 12 months after leaving the company."""
+
+
+def test_sixty_day_notice_is_not_a_red_flag_and_advice_never_repeats_the_letter():
+    with TestClient(app, headers=ME) as c:
+        d = c.post("/api/offers/text", json={"text": KESTREL}).json()
+        flags = {f["key"]: f for f in d["red_flags"]["flags"]}
+        assert "notice_period" not in flags and "non_compete" in flags
+        assert d["red_flags"]["notice_days"] == 60
+        claw = flags["joining_clawback"]["detail"]
+        assert "joining.” Ask" in claw  # the quotation closes with a full stop
+        points = {p["key"]: p for p in d["negotiation_points"]}
+        assert points["notice_period"]["ask"] == "Ask to reduce the notice period to 30 days."
+        assert "non-compete" in points["non_compete"]["ask"]
+
+
+def test_questions_get_the_offer_red_flags_as_known_risks(monkeypatch):
+    import app.services.explain as ex
+    seen = {}
+
+    def fake_chat(messages, **kw):
+        seen["prompt"] = messages[-1]["content"]
+        seen["system"] = messages[0]["content"]
+        return "Noted."
+    monkeypatch.setattr(ex, "chat", fake_chat)
+    with TestClient(app, headers=ME) as c:
+        d = c.post("/api/offers/text", json={"text": KESTREL}).json()
+        c.post(f"/api/offers/{d['id']}/ask", json={"question": "If I quit after 8 months to join a competitor, what do I lose?"})
+    assert "KNOWN RISKS IN THIS OFFER" in seen["prompt"] and "Non-compete" in seen["prompt"]
+    assert "forfeited if you leave before the payout date" in seen["prompt"]
+    assert "never say something is the only thing you lose" in seen["system"]

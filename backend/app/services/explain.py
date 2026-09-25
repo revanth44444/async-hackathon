@@ -57,7 +57,9 @@ def rules(r: CalculationResult) -> list[str]:
     if s.meal_allowance > 0:
         out.append(f"Meal allowance is taxable in the new regime; up to {inr(MEAL_EXEMPTION_OLD)} a year is exempt in the old regime.")
     if s.variable_pay > 0:
-        out.append(f"Variable pay is a target, not guaranteed. Figures assume {a.variable_payout_pct:.0f}% is paid out.")
+        out.append(f"Variable pay is a target, not guaranteed. Figures assume {a.variable_payout_pct:.0f}% is paid out. "
+                   "It is usually paid yearly, and usually forfeited if you leave before the payout date, unless the "
+                   "letter says it is pro-rated. Never say leaving early does not affect it.")
     if s.gratuity > 0:
         out.append("Gratuity is paid only after 5 years of service. It is not part of monthly pay.")
     if s.joining_bonus > 0:
@@ -236,14 +238,21 @@ def explain_offer(r: CalculationResult, notes: list[str] | None = None) -> tuple
     return (text, "ai") if text else (_template(r), "template")
 
 
-def answer_question(r: CalculationResult, question: str, raw_text: str | None) -> str:
+def answer_question(r: CalculationResult, question: str, raw_text: str | None, risks: list[str] | None = None) -> str:
+    """`risks` are the offer's red flags (title and detail), so answers about leaving, switching jobs or
+    joining a competitor can't skip a clause the page has already flagged."""
     context = _payload(r)
+    if risks:
+        context += "\n\nKNOWN RISKS IN THIS OFFER:\n" + "\n".join(f"- {x}" for x in risks)
     if raw_text:
         context += f"\n\nOFFER LETTER TEXT (for policy questions):\n{raw_text[:8000]}"
     try:
         text = verified_chat(
             [
-                {"role": "system", "content": SYSTEM + " Answer in under 150 words. If the data can't answer it, say so."},
+                {"role": "system", "content": SYSTEM + " Answer in under 150 words. If the data can't answer it, say so. "
+                 "If the question is about leaving, resigning, switching jobs or joining another company, address every "
+                 "KNOWN RISK that could apply (clawbacks, bonds, notice period, non-compete, forfeited variable or "
+                 "retention pay), and never say something is the only thing you lose."},
                 {"role": "user", "content": f"{context}\n\nQUESTION: {question}"},
             ],
             allowed_amounts([r], context),

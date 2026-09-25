@@ -26,6 +26,18 @@ class RedFlagReport(BaseModel):
     score: int  # 100 = nothing to worry about; lower = more red flags
     level: Literal["Low risk", "Some concerns", "High risk"]
     flags: list[RedFlag]
+    notice_days: int | None = None  # as stated in the letter, for negotiation advice
+    has_non_compete: bool = False
+
+
+def _quote(sentence: str, limit: int = 180) -> str:
+    """A sentence from the letter as a complete quotation: cut at a word boundary, always closed by punctuation."""
+    q = sentence.strip()
+    if len(q) > limit:
+        q = q[:limit].rsplit(" ", 1)[0].rstrip(",;:") + "…"
+    elif q[-1] not in ".!?…":
+        q += "."
+    return f"“{q}”"
 
 
 def _sentences(text: str) -> list[str]:
@@ -73,22 +85,24 @@ def red_flags(r: CalculationResult, letter_text: str = "", notes: list[str] | No
             f"Only {r.in_hand_pct_of_ctc:.0%} of the CTC arrives as take-home pay. The rest is tax, PF, benefits or non-cash.")
 
     if bond := _find(text, r"\bbond\b|minimum service|service agreement"):
-        add("service_bond", "high", "Service bond", f"The letter says: “{bond[:180]}” Leaving early may cost you money.")
+        add("service_bond", "high", "Service bond", f"The letter says: {_quote(bond)} Leaving early may cost you money.")
 
     if s.joining_bonus > 0 and (claw := _find(text, r"(joining|sign[- ]?on).*(recover|claw|repay|refund|return)|(recover|claw|repay|refund).*(joining|sign[- ]?on)")):
         add("joining_clawback", "medium", "Joining bonus can be clawed back",
-            f"The letter says: “{claw[:180]}” Ask whether the repayment is pro-rated.")
+            f"The letter says: {_quote(claw)} Ask whether the repayment is pro-rated.")
 
     if s.retention_bonus > 0:
         when = f"after {s.retention_after_months:g} months" if s.retention_after_months > 0 else "only after a qualifying period"
         add("retention_conditional", "low", "Retention bonus is conditional",
             f"{inr(s.retention_bonus)} is paid {when}, and only if you are still employed. Leave earlier and you get none of it.")
 
-    if (days := _notice_days(text)) is not None and days >= 60:
+    days = _notice_days(text)
+    if days is not None and days > 60:  # 30 to 60 days is the norm, so only longer periods are a red flag
         add("notice_period", "medium" if days >= 90 else "low", f"{days}-day notice period",
-            "A long notice period can delay your next move. Many employers accept 30 to 60 days.")
+            "That is longer than usual: most employers ask for 30 to 60 days. A long notice period can delay your next move.")
 
-    if _find(text, r"non[- ]?compete|non[- ]?solicit"):
+    non_compete = bool(_find(text, r"non[- ]?compete|non[- ]?solicit"))
+    if non_compete:
         add("non_compete", "medium", "Non-compete or non-solicit clause",
             "The letter restricts where you can work or whom you can approach after leaving. Ask for its duration and scope.")
 
@@ -108,4 +122,4 @@ def red_flags(r: CalculationResult, letter_text: str = "", notes: list[str] | No
     flags.sort(key=lambda f: order[f.severity])
     score = max(0, 100 - sum(PENALTY[f.severity] for f in flags))
     level = "Low risk" if score >= 80 else "Some concerns" if score >= 60 else "High risk"
-    return RedFlagReport(score=score, level=level, flags=flags)
+    return RedFlagReport(score=score, level=level, flags=flags, notice_days=days, has_non_compete=non_compete)

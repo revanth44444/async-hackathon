@@ -296,7 +296,8 @@ def explain(offer_id: str, refresh: bool = False, owner: str = Depends(client_id
 @router.post("/{offer_id}/ask")
 def ask(offer_id: str, body: Question, owner: str = Depends(client_id), db: Session = Depends(get_db)):
     o = _get(db, offer_id, owner)
-    return {"answer": answer_question(CalculationResult(**o.result), body.question, o.raw_text)}
+    risks = [f"{f.title}: {f.detail}" for f in _report(o).flags]
+    return {"answer": answer_question(CalculationResult(**o.result), body.question, o.raw_text, risks)}
 
 
 @router.post("/{offer_id}/negotiation-email", response_model=NegotiationEmail)
