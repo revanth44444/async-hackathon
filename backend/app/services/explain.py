@@ -121,6 +121,10 @@ Every figure is pre-calculated and pre-formatted for you. Copy rupee amounts exa
 Never add, subtract, multiply, divide, round, convert or estimate any number. Never write a rupee amount that is not in the data.
 If a figure you want is not provided, describe it in words instead.
 Tax statements must follow the RULES given. Do not state any other tax rule.
+Only state a company policy, legal rule or consequence (salary deductions, notice buyouts, penalties, repayment or
+clawback terms, what happens on resignation) if it appears in the OFFER LETTER TEXT, the RULES or the KNOWN RISKS.
+Never fill gaps with what companies usually do. If the letter doesn't say, write that the letter doesn't say and
+suggest confirming with HR.
 Style: understated and editorial, like a private banker's note. Short paragraphs and simple bullet lists only.
 Use "###" for section headings. No tables, no emojis, no exclamation marks, no bold or italics.
 Never mention JSON, field names, data, rules lists or the engine. Speak directly to the reader as "you"."""
@@ -285,19 +289,23 @@ def tradeoffs(labelled: list[tuple[str, CalculationResult]]) -> str:
     return "\n".join(lines)
 
 
-def compare_verdict(labelled: list[tuple[str, CalculationResult]], winners: dict[str, str], suits: str) -> str:
+def compare_verdict(labelled: list[tuple[str, CalculationResult]], winners: dict[str, str], suits: str,
+                    ties: dict[str, list[str]] | None = None) -> str:
     """Written entirely from computed figures. An AI version attached real amounts to the wrong offer
     (e.g. one offer's ESOPs to another), which amount verification can't catch, so none is used here."""
-    return f"{tradeoffs(labelled)}\n\n{winners_summary(winners, suits)}"
+    return f"{tradeoffs(labelled)}\n\n{winners_summary(winners, suits, ties)}"
 
 
-def winners_summary(winners: dict[str, str], suits: str) -> str:
+def winners_summary(winners: dict[str, str], suits: str, ties: dict[str, list[str]] | None = None) -> str:
     """Who leads on what, plus the recommendation."""
     by_offer: dict[str, list[str]] = {}
     for metric, label in winners.items():
         by_offer.setdefault(label, []).append(metric[0].lower() + metric[1:])
     lines = ["### Where each offer leads\n"]
     lines += [f"- {label}: {'; '.join(metrics)}." for label, metrics in by_offer.items()]
+    for metric, labels in (ties or {}).items():
+        names = ", ".join(labels[:-1]) + f" and {labels[-1]}"
+        lines.append(f"- Tied on {metric[0].lower() + metric[1:]}: {names}.")
     if len(by_offer) > 1:
         lines.append("\nNo single offer wins on everything.")
     lines += ["\n### Our recommendation\n", suits]

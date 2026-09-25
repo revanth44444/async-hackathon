@@ -114,17 +114,26 @@ export function BreakdownEditor({ offer, onSaved }: { offer: OfferDetail; onSave
   const outsideTotal = offer.result.components.filter((c) => !c.in_ctc).reduce((sum, c) => sum + c.annual, 0);
   const rows = editing ? EDITABLE : EDITABLE.filter((f) => offer.structure[f.key] > 0);
   const groups = [...new Set(rows.map((r) => r.group))];
-  const source =
-    offer.extraction_meta.method === "ai"
+  const estimated = offer.extraction_meta.estimated_split;
+  const source = estimated
+    ? offer.extraction_meta.method === "manual"
+      ? "Estimated from the CTC you entered. Edit to match your payslip."
+      : "Estimated from the letter's total. Edit to match your payslip."
+    : offer.extraction_meta.method === "ai"
       ? "Read by AI from your letter. Please verify."
       : offer.extraction_meta.method === "heuristic"
         ? "Read by keyword matching. Please verify."
         : "Entered by you.";
+  // Gap between the stated CTC and everything counted inside it; one click moves it into special allowance
+  const counted = offer.result.components.filter((c) => c.in_ctc).reduce((sum, c) => sum + c.annual, 0);
+  const gap = Math.round(offer.structure.ctc - counted);
+  const canBalance =
+    !editing && Math.abs(gap) > Math.max(1000, 0.001 * offer.structure.ctc) && offer.structure.special_allowance + gap >= 0;
 
-  async function save() {
+  async function save(structure: SalaryStructure = draft) {
     setSaving(true);
     try {
-      onSaved(await api.updateOffer(offer.id, { structure: draft }));
+      onSaved(await api.updateOffer(offer.id, { structure }));
       setEditing(false);
     } finally {
       setSaving(false);
@@ -151,7 +160,7 @@ export function BreakdownEditor({ offer, onSaved }: { offer: OfferDetail; onSave
               >
                 Cancel
               </button>
-              <button className="btn-primary" onClick={save} disabled={saving}>
+              <button className="btn-primary" onClick={() => save()} disabled={saving}>
                 {saving && <Loader2 size={14} className="animate-spin" />} Save
               </button>
             </div>
@@ -229,6 +238,24 @@ export function BreakdownEditor({ offer, onSaved }: { offer: OfferDetail; onSave
               )}
             </td>
           </tr>
+          {canBalance && (
+            <tr>
+              <td colSpan={3} className="pt-4">
+                <div className="flex flex-col gap-3 rounded-2xl bg-bad-soft px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+                  <span className="text-bad">
+                    Components are {inr(Math.abs(gap))} {gap > 0 ? "short of" : "over"} the stated CTC.
+                  </span>
+                  <button
+                    className="link-cta shrink-0 text-ink"
+                    disabled={saving}
+                    onClick={() => save({ ...offer.structure, special_allowance: offer.structure.special_allowance + gap })}
+                  >
+                    {saving ? "Balancing…" : "Balance into special allowance"}
+                  </button>
+                </div>
+              </td>
+            </tr>
+          )}
           {!editing && outsideTotal > 0 && (
             <tr>
               <td colSpan={3} className="pt-2 text-sm text-muted">

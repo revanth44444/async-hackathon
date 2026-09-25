@@ -120,31 +120,37 @@ class CompareRow(BaseModel):
 
 class CompareResult(BaseModel):
     rows: list[CompareRow]
-    best_monthly_in_hand: str  # guaranteed: fixed pay after tax, PF and professional tax
-    best_annual_take_home: str  # includes variable pay at the assumed payout
-    best_year_one: str
-    best_fixed_pay: str  # fixed pay before deductions
-    best_retirement: str
-    lowest_tax: str
+    # Each best_* is the leading offer's id, or None when two or more offers tie for the lead
+    best_monthly_in_hand: str | None  # guaranteed: fixed pay after tax, PF and professional tax
+    best_annual_take_home: str | None  # includes variable pay at the assumed payout
+    best_year_one: str | None
+    best_fixed_pay: str | None  # fixed pay before deductions
+    best_retirement: str | None
+    lowest_tax: str | None
+    ties: dict[str, list[str]] = {}  # metric label → labels of the offers tied for the lead
     verdict: str | None = None
 
     def winners(self) -> dict[str, str]:
-        """Human-readable metric → winning offer label, handed to the AI as settled facts."""
+        """Human-readable metric → sole leading offer's label. Tied metrics are left out (see `ties`)."""
         label = {r.offer_id: r.label for r in self.rows}
-        return {
-            "Highest guaranteed monthly in-hand (after tax and PF)": label[self.best_monthly_in_hand],
-            "Highest annual take-home if variable pay is paid as assumed": label[self.best_annual_take_home],
-            "Highest year-one take-home including one-time bonuses": label[self.best_year_one],
-            "Highest fixed pay before tax and PF": label[self.best_fixed_pay],
-            "Most retirement savings (PF + NPS)": label[self.best_retirement],
-            "Lowest income tax": label[self.lowest_tax],
-        }
+        pairs = [
+            ("Highest guaranteed monthly in-hand (after tax and PF)", self.best_monthly_in_hand),
+            ("Highest annual take-home if variable pay is paid as assumed", self.best_annual_take_home),
+            ("Highest year-one take-home including one-time bonuses", self.best_year_one),
+            ("Highest fixed pay before tax and PF", self.best_fixed_pay),
+            ("Most retirement savings (PF + NPS)", self.best_retirement),
+            ("Lowest income tax", self.lowest_tax),
+        ]
+        return {metric: label[oid] for metric, oid in pairs if oid is not None}
 
     def suitability(self) -> str:
         """Which offer suits a certainty-seeker vs someone comfortable with variable pay, decided here so the
         model can't swap them. Certainty = most guaranteed monthly pay; variable comfort = most take-home
         if variable pay pays out."""
         label = {r.offer_id: r.label for r in self.rows}
+        if self.best_monthly_in_hand is None or self.best_annual_take_home is None:
+            return ("No single offer leads on both guaranteed monthly in-hand and take-home with variable pay, "
+                    "so weigh the red flags and one-time bonuses to choose.")
         safe, upside = label[self.best_monthly_in_hand], label[self.best_annual_take_home]
         if safe == upside:
             return (f"{safe} suits both a candidate who values certainty and one comfortable with variable pay: "
@@ -153,17 +159,28 @@ class CompareResult(BaseModel):
                 f"For someone comfortable with variable pay, {upside}: it pays the most if variable pay is paid out.")
 
 
+TIE_TOLERANCE = 1  # ₹: amounts within a rupee are the same number on screen
+
+
 def compare_metrics(rows: list[CompareRow]) -> CompareResult:
-    def best(key, lowest=False):
-        pick = min if lowest else max
-        return pick(rows, key=lambda r: key(r.result)).offer_id
+    ties: dict[str, list[str]] = {}
+
+    def best(metric: str, key, lowest=False) -> str | None:
+        vals = [(key(r.result), r) for r in rows]
+        top = (min if lowest else max)(v for v, _ in vals)
+        leaders = [r for v, r in vals if abs(v - top) <= TIE_TOLERANCE]
+        if len(leaders) > 1:
+            ties[metric] = [r.label for r in leaders]
+            return None
+        return leaders[0].offer_id
 
     return CompareResult(
         rows=rows,
-        best_monthly_in_hand=best(lambda r: r.monthly_in_hand),
-        best_annual_take_home=best(lambda r: r.annual_take_home),
-        best_year_one=best(lambda r: r.year_one_take_home),
-        best_fixed_pay=best(lambda r: r.fixed_cash),
-        best_retirement=best(lambda r: r.employee_pf + r.structure.employer_pf + r.structure.employer_nps),
-        lowest_tax=best(lambda r: r.regimes[r.selected_regime].tax.total_tax, lowest=True),
+        best_monthly_in_hand=best("Highest guaranteed monthly in-hand (after tax and PF)", lambda r: r.monthly_in_hand),
+        best_annual_take_home=best("Highest annual take-home if variable pay is paid as assumed", lambda r: r.annual_take_home),
+        best_year_one=best("Highest year-one take-home including one-time bonuses", lambda r: r.year_one_take_home),
+        best_fixed_pay=best("Highest fixed pay before tax and PF", lambda r: r.fixed_cash),
+        best_retirement=best("Most retirement savings (PF + NPS)", lambda r: r.employee_pf + r.structure.employer_pf + r.structure.employer_nps),
+        lowest_tax=best("Lowest income tax", lambda r: r.regimes[r.selected_regime].tax.total_tax, lowest=True),
+        ties=ties,
     )

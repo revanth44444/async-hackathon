@@ -88,7 +88,7 @@ def compare(body: CompareRequest, owner: str = Depends(client_id), db: Session =
     result = compare_metrics(rows)
     if body.ai_verdict:
         winners, suits = result.winners(), result.suitability()
-        result.verdict = compare_verdict([(r.label, r.result) for r in rows], winners, suits)
+        result.verdict = compare_verdict([(r.label, r.result) for r in rows], winners, suits, result.ties)
     record_activity(db)
     db.commit()
     return result

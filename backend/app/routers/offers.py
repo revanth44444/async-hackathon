@@ -16,7 +16,7 @@ from app.engine.schemas import Assumptions, CalculationResult, SalaryStructure
 from app.models import Offer
 from app.services.cleanup import record_activity
 from app.services.explain import answer_question, explain_offer
-from app.services.extraction import _annualise_esop, extract_structure
+from app.services.extraction import _annualise_esop, extract_structure, location_defaults
 from app.services.negotiate import NegotiationEmail, NegotiationPoint, negotiation_email, negotiation_points
 from app.services.pdf import PDFError, extract_text
 
@@ -53,7 +53,7 @@ class OfferDetail(OfferSummary):
 class ManualCreate(BaseModel):
     label: str | None = None
     structure: SalaryStructure
-    assumptions: Assumptions = Field(default_factory=Assumptions)
+    assumptions: Assumptions | None = None  # None: state and metro are read from structure.location
 
 
 class TextCreate(BaseModel):
@@ -243,8 +243,12 @@ def create_manual(body: ManualCreate, owner: str = Depends(client_id), db: Sessi
     s, estimates = complete_structure(s)
     _record_estimates(meta, estimates)
     record_activity(db)
+    a = body.assumptions
+    if a is None:
+        loc = location_defaults(s.location)
+        a = Assumptions(state=loc["state"] or "KA", metro=loc["metro"])
     o = Offer(owner_id=owner, label=body.label or s.company or "Manual offer", source="manual", extraction_meta=meta)
-    _apply(o, s, body.assumptions)
+    _apply(o, s, a)
     db.add(o)
     db.commit()
     return _detail(o)

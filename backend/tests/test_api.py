@@ -233,3 +233,24 @@ def test_questions_get_the_offer_red_flags_as_known_risks(monkeypatch):
     assert "KNOWN RISKS IN THIS OFFER" in seen["prompt"] and "Non-compete" in seen["prompt"]
     assert "forfeited if you leave before the payout date" in seen["prompt"]
     assert "never say something is the only thing you lose" in seen["system"]
+
+
+def test_manual_entry_reads_state_from_city_or_explicit_choice():
+    with TestClient(app, headers=ME) as c:
+        d = c.post("/api/offers", json={"structure": {"ctc": 1_200_000, "location": "Mumbai"}}).json()
+        assert d["assumptions"]["state"] == "MH" and d["assumptions"]["metro"] is True
+        assert d["result"]["professional_tax"] == 2_500
+        d = c.post("/api/offers", json={"structure": {"ctc": 1_200_000, "location": "Kolkata"},
+                                        "assumptions": {"state": "TN"}}).json()
+        assert d["assumptions"]["state"] == "TN"
+
+
+def test_compare_reports_ties_instead_of_picking_one():
+    with TestClient(app, headers=ME) as c:
+        s = {"ctc": 900_000, "basic": 360_000, "hra": 180_000, "special_allowance": 338_400, "employer_pf": 21_600}
+        a = c.post("/api/offers", json={"structure": s}).json()
+        b = c.post("/api/offers", json={"structure": {**s, "ctc": 1_000_000, "special_allowance": 438_400}}).json()
+        cmp = c.post("/api/compare", json={"offer_ids": [a["id"], b["id"]]}).json()
+        assert cmp["best_retirement"] is None and cmp["lowest_tax"] is None  # same PF, both ₹0 tax
+        assert cmp["best_monthly_in_hand"] == b["id"]
+        assert "Tied on most retirement savings" in cmp["verdict"] and "Tied on lowest income tax" in cmp["verdict"]

@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, Loader2 } from "lucide-react";
 import { api, type OfferDetail, type SalaryStructure } from "@/lib/api";
+import { STATE_NAMES } from "@/lib/format";
 
 type Tab = "upload" | "paste" | "manual";
 
@@ -71,8 +72,10 @@ export function NewOffer() {
       location: manual.location || null,
     };
     for (const f of MANUAL_FIELDS) (structure as Record<string, unknown>)[f.key] = num(f.key);
-    // Missing breakup is estimated by the backend (and labelled as an estimate on the offer page)
-    run(() => api.createManual(structure, undefined, manual.company || undefined));
+    // Missing breakup is estimated by the backend (and labelled as an estimate on the offer page).
+    // Without an explicit state, the backend reads state and metro status from the city.
+    const assumptions = manual.state ? { state: manual.state, metro: /mumbai|delhi|kolkata|chennai/i.test(manual.location ?? "") } : undefined;
+    run(() => api.createManual(structure, assumptions, manual.company || undefined));
   }
 
   return (
@@ -150,13 +153,33 @@ export function NewOffer() {
 
         {tab === "manual" && (
           <div className="space-y-8">
-            <div className="grid gap-6 sm:grid-cols-3">
-              {(["company", "role", "location"] as const).map((k) => (
+            <div className="grid gap-6 sm:grid-cols-4">
+              {([["company", "Company"], ["role", "Role"], ["location", "City"]] as const).map(([k, label]) => (
                 <div key={k}>
-                  <label className="label">{k}</label>
-                  <input className="input" value={manual[k] ?? ""} onChange={(e) => setManual({ ...manual, [k]: e.target.value })} />
+                  <label className="label" htmlFor={`manual-${k}`}>
+                    {label}
+                  </label>
+                  <input id={`manual-${k}`} className="input" value={manual[k] ?? ""} onChange={(e) => setManual({ ...manual, [k]: e.target.value })} />
                 </div>
               ))}
+              <div>
+                <label className="label" htmlFor="manual-state">
+                  Work state
+                </label>
+                <select
+                  id="manual-state"
+                  className="input"
+                  value={manual.state ?? ""}
+                  onChange={(e) => setManual({ ...manual, state: e.target.value })}
+                >
+                  <option value="">From the city</option>
+                  {Object.entries(STATE_NAMES).map(([code, name]) => (
+                    <option key={code} value={code}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-6 sm:grid-cols-4">
               {MANUAL_FIELDS.map((f) => (

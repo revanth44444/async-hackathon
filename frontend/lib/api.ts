@@ -180,12 +180,14 @@ export interface SimulationResult {
 
 export interface CompareResult {
   rows: { offer_id: string; label: string; result: CalculationResult; red_flags: RedFlagReport | null }[];
-  best_monthly_in_hand: string;
-  best_annual_take_home: string;
-  best_year_one: string;
-  best_fixed_pay: string;
-  best_retirement: string;
-  lowest_tax: string;
+  // Each best_* is null when two or more offers tie for the lead
+  best_monthly_in_hand: string | null;
+  best_annual_take_home: string | null;
+  best_year_one: string | null;
+  best_fixed_pay: string | null;
+  best_retirement: string | null;
+  lowest_tax: string | null;
+  ties: Record<string, string[]>;
   verdict: string | null;
 }
 
