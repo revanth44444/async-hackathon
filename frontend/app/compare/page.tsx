@@ -13,16 +13,26 @@ type Metric = { label: string; get: (r: CalculationResult) => number; fmt?: (v: 
 
 const METRICS: Metric[] = [
   { label: "Stated CTC", get: (r) => r.structure.ctc, fmt: lakh },
-  { label: "Monthly in-hand", get: (r) => r.monthly_in_hand, best: "max" },
-  { label: "Annual take-home", get: (r) => r.annual_take_home, best: "max" },
+  { label: "Guaranteed monthly in-hand", get: (r) => r.monthly_in_hand, best: "max" },
+  { label: "Annual take-home, if bonus pays out", get: (r) => r.annual_take_home, best: "max" },
   { label: "Year one, with joining bonus", get: (r) => r.year_one_take_home, best: "max" },
-  { label: "Guaranteed fixed cash", get: (r) => r.fixed_cash, best: "max" },
+  { label: "Fixed pay before tax & PF", get: (r) => r.fixed_cash, best: "max" },
   { label: "Variable pay (target)", get: (r) => r.structure.variable_pay },
   { label: "Income tax", get: (r) => r.regimes[r.selected_regime].tax.total_tax, best: "min" },
   { label: "Retirement savings", get: (r) => r.employee_pf + r.structure.employer_pf + r.structure.employer_nps, best: "max" },
   { label: "ESOPs per year", get: (r) => r.structure.esop_value },
   { label: "Share of CTC as cash", get: (r) => r.in_hand_pct_of_ctc, fmt: (v) => pct(v), best: "max" },
 ];
+
+/** Winner labels for an offer. Decided by the engine, so they always agree with the table and the verdict. */
+function badges(d: CompareResult, id: string): string[] {
+  const guaranteed = d.best_monthly_in_hand === id;
+  const withBonus = d.best_annual_take_home === id;
+  const out = guaranteed && withBonus ? ["Most take-home"] : [guaranteed && "Most guaranteed pay", withBonus && "Most if bonus pays out"];
+  if (d.best_fixed_pay === id && !guaranteed) out.push("Most fixed pay");
+  if (d.best_retirement === id && !guaranteed && !withBonus) out.push("Most retirement savings");
+  return out.filter(Boolean).slice(0, 2) as string[];
+}
 
 function CompareInner() {
   const params = useSearchParams();
@@ -100,10 +110,14 @@ function CompareInner() {
             <table className="w-full min-w-[600px] text-[15px]">
               <thead>
                 <tr>
-                  <th />
+                  <th className="pb-6 text-left align-bottom text-xs text-muted">Green marks the leader on each row</th>
                   {data.rows.map((r) => (
                     <th key={r.offer_id} className="pb-6 text-right align-bottom">
-                      {r.offer_id === data.best_annual_take_home && <span className="eyebrow mb-2 block !text-good">Most cash</span>}
+                      {badges(data, r.offer_id).map((b) => (
+                        <span key={b} className="eyebrow mb-1 block !text-good">
+                          {b}
+                        </span>
+                      ))}
                       <Link href={`/offers/${r.offer_id}`} className="serif text-xl hover:opacity-60">
                         {r.label}
                       </Link>

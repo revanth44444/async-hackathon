@@ -148,6 +148,9 @@ export interface CompareResult {
   best_monthly_in_hand: string;
   best_annual_take_home: string;
   best_year_one: string;
+  best_fixed_pay: string;
+  best_retirement: string;
+  lowest_tax: string;
   verdict: string | null;
 }
 
