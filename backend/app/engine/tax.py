@@ -40,7 +40,7 @@ EMPLOYER_NPS_LIMIT_PCT_OF_BASIC: dict[Regime, float] = {"new": 0.14, "old": 0.10
 
 # State: (annual professional tax, minimum monthly gross for it to apply). Approximate.
 PROFESSIONAL_TAX: dict[str, tuple[float, float]] = {
-    "KA": (2_400, 25_000),
+    "KA": (2_500, 25_000),  # ₹200 × 11 months + ₹300 in February
     "MH": (2_500, 10_000),
     "TN": (2_500, 21_000),
     "TS": (2_400, 20_000),

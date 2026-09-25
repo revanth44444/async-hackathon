@@ -97,7 +97,8 @@ function CompareInner() {
               })}
             </div>
             <button className="btn-primary mt-8" disabled={selected.length < 2 || busy} onClick={run}>
-              {busy && <Loader2 size={14} className="animate-spin" />} Compare {selected.length} offers
+              {busy && <Loader2 size={14} className="animate-spin" />}
+              {selected.length === 0 ? "Select 2 offers" : selected.length === 1 ? "Select 1 more offer" : `Compare ${selected.length} offers`}
             </button>
           </>
         )}

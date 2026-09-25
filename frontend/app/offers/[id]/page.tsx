@@ -66,7 +66,9 @@ export default function OfferPage() {
                 {inr(r.monthly_in_hand)}
               </p>
               <p className="mt-4 text-white/55">a month, in hand, out of a {lakh(r.structure.ctc)} CTC.</p>
-              <p className="mt-2 text-xs text-white/35">Only this browser can see this offer.</p>
+              <p className="mt-2 text-xs text-white/35">
+                Only this browser can see this offer.{offer.filename ? " The original PDF was not stored." : ""}
+              </p>
             </div>
             {offer.structure.joining_bonus > 0 && (
               <p className="text-sm text-white/55 sm:text-right">

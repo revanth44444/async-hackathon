@@ -1,5 +1,6 @@
 from app.engine.calculator import calculate
 from app.engine.schemas import Assumptions, SalaryStructure
+from app.engine.calculator import inr
 from app.services.explain import allowed_amounts, facts, rules, unsupported_amounts
 
 NIMBUS = SalaryStructure(
@@ -14,7 +15,7 @@ def test_wrong_lakh_conversion_is_caught():
     # The reviewer's example: 16.2L written as "1.62 L"
     assert unsupported_amounts("Year one is about ₹1.62 L.", allowed) == ["₹1.62 L"]
     assert unsupported_amounts(f"Year one is ₹{r.year_one_take_home / 1e5:.1f}L.", allowed) == []
-    assert unsupported_amounts("Your in-hand is ₹1,09,549 a month.", allowed) == []
+    assert unsupported_amounts(f"Your in-hand is {inr(r.monthly_in_hand)} a month.", allowed) == []
     assert unsupported_amounts("You'd get ₹1,23,456 extra.", allowed) == ["₹1,23,456"]
 
 

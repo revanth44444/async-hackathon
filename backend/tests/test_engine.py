@@ -64,7 +64,7 @@ def test_typical_18_lpa_offer():
     r = calculate(s, Assumptions(state="KA"))
     assert not r.warnings
     assert r.employee_pf == 86_400
-    assert r.professional_tax == 2_400
+    assert r.professional_tax == 2_500  # Karnataka: ₹200 × 11 + ₹300 in February
     assert r.selected_regime == "new"
     # Buckets reconcile back to CTC
     assert sum(b.amount for b in r.ctc_buckets) == pytest.approx(1_800_000, abs=5)

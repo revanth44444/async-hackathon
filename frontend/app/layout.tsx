@@ -7,9 +7,22 @@ import "./globals.css";
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"], weight: ["200", "300", "400"] });
 const bodoni = Bodoni_Moda({ variable: "--font-bodoni", subsets: ["latin"], weight: ["400"], style: ["normal", "italic"] });
 
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://offerlens-sand.vercel.app";
+const DESCRIPTION = "Upload an offer letter and see your real monthly in-hand salary, both tax regimes, explained line by line.";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: "OfferLens — know your real salary",
-  description: "Upload an offer letter, see your real in-hand salary, compare offers and simulate what-ifs.",
+  description: DESCRIPTION,
+  openGraph: {
+    title: "OfferLens — your CTC isn't your salary",
+    description: DESCRIPTION,
+    url: SITE_URL,
+    siteName: "OfferLens",
+    type: "website",
+    locale: "en_IN",
+  },
+  twitter: { card: "summary_large_image", title: "OfferLens — your CTC isn't your salary", description: DESCRIPTION },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -20,11 +33,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           Salary estimates for FY 2025–26 · Indian income-tax rules
         </div>
         <header className="sticky top-0 z-30 border-b border-line/70 bg-bg/80 backdrop-blur-xl">
-          <div className="wrap flex h-16 items-center gap-10">
-            <Link href="/" className="serif text-[19px] uppercase tracking-[0.32em] text-ink">
+          <div className="wrap flex h-16 items-center gap-5 sm:gap-10">
+            <Link href="/" className="serif text-[15px] uppercase tracking-[0.24em] text-ink sm:text-[19px] sm:tracking-[0.32em]">
               OfferLens
             </Link>
-            <nav className="hidden items-center gap-8 text-[11px] uppercase tracking-[0.22em] text-muted sm:flex">
+            <nav className="flex items-center gap-5 text-[11px] uppercase tracking-[0.22em] text-muted sm:gap-8">
               <Link href="/" className="transition hover:text-ink">
                 Analyze
               </Link>
@@ -33,9 +46,6 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
               </Link>
             </nav>
             <div className="ml-auto flex items-center gap-6">
-              <Link href="/compare" className="text-[11px] uppercase tracking-[0.22em] text-muted sm:hidden">
-                Compare
-              </Link>
               <AiBadge />
             </div>
           </div>

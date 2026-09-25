@@ -21,7 +21,7 @@ export function AiBadge() {
   return (
     <span title={title} className="inline-flex items-center gap-2 text-[10px] uppercase tracking-[0.22em] text-muted">
       <span className={`size-1.5 rounded-full ${dot}`} />
-      {text}
+      <span className="hidden sm:inline">{text}</span>
     </span>
   );
 }
