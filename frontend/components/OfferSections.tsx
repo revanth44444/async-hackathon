@@ -110,7 +110,7 @@ export function BreakdownEditor({ offer, onSaved }: { offer: OfferDetail; onSave
   const num = (v: string) => Number(v.replace(/[^\d.]/g, "")) || 0;
 
   return (
-    <div>
+    <div id="components" className="scroll-mt-24">
       <SectionHead
         eyebrow="Structure"
         title="Salary components"
@@ -425,6 +425,69 @@ export function LetterNotes({ notes }: { notes?: string[] }) {
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+export function EstimateNotice() {
+  return (
+    <div className="flex flex-col gap-3 rounded-[22px] bg-surface-2 p-6 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <p className="eyebrow">Estimated split</p>
+        <p className="mt-2 max-w-2xl text-sm text-ink/80">
+          Your letter states only the total CTC, so we used a typical structure: basic at 40% of fixed pay, HRA at half of
+          basic and 12% PF. Enter the exact components from your salary annexure for precise figures.
+        </p>
+      </div>
+      <a href="#components" className="link-cta shrink-0">
+        Edit components
+      </a>
+    </div>
+  );
+}
+
+/** Current rules side by side, with this offer's own tax as the last row. */
+export function RegimeGuide({ r }: { r: CalculationResult }) {
+  const rows: [string, string, string][] = [
+    ["Tax slabs", "0%, 5%, 20%, 30% (4 slabs)", "0%, 5%, 10%, 15%, 20%, 25%, 30% (7 slabs)"],
+    ["Tax-free up to", "₹5L taxable income (about ₹5.5L salary)", "₹12L taxable income (about ₹12.75L salary)"],
+    ["Rebate under 87A", "Up to ₹12,500", "Up to ₹60,000, with marginal relief"],
+    ["Standard deduction", "₹50,000", "₹75,000"],
+    ["Deductions & exemptions", "HRA, LTA, 80C, 80D, home-loan interest and more", "Only employer NPS (up to 14% of basic)"],
+    ["Suits", "People with rent, investments or a home loan", "Most salaried people"],
+  ];
+  return (
+    <div>
+      <SectionHead eyebrow="At a glance" title="Old vs new regime" sub="Rules for FY 2025–26 (AY 2026–27), for salaried individuals under 60." />
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[560px] text-[15px]">
+          <thead>
+            <tr className="text-left">
+              <th className="w-1/4 pb-4" />
+              <th className="eyebrow pb-4">Old regime</th>
+              <th className="eyebrow pb-4">New regime</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(([label, old, neu]) => (
+              <tr key={label} className="border-t border-line align-top">
+                <td className="py-4 pr-4 text-muted">{label}</td>
+                <td className="py-4 pr-6">{old}</td>
+                <td className="py-4">{neu}</td>
+              </tr>
+            ))}
+            <tr className="border-t border-ink align-top">
+              <td className="serif py-4 pr-4 text-lg">Your tax on this offer</td>
+              {(["old", "new"] as const).map((k) => (
+                <td key={k} className={`tabular py-4 text-lg ${r.recommended_regime === k ? "text-good" : ""}`}>
+                  {inr(r.regimes[k].tax.total_tax)}
+                  {r.recommended_regime === k && <span className="ml-2 text-xs text-muted">lower</span>}
+                </td>
+              ))}
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

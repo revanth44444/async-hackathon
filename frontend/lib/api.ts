@@ -124,6 +124,7 @@ export interface ExtractionMeta {
   joining_date?: string | null;
   components?: { label: string; annual_amount: number; category: string }[];
   notes?: string[];
+  estimated_split?: boolean;
 }
 
 export interface OfferDetail extends OfferSummary {

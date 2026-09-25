@@ -48,6 +48,31 @@ def inr(v: float) -> str:
     return f"{sign}₹{s}"
 
 
+def estimate_split(s: SalaryStructure) -> SalaryStructure:
+    """Fill a typical Indian salary split when a letter states only the CTC. The result is flagged as an
+    estimate by the caller. Basic 40% of fixed CTC, HRA 50% of basic, PF 12% and gratuity 4.81% of basic."""
+    fixed_ctc = s.ctc - s.variable_pay - s.joining_bonus - s.esop_value - s.insurance
+    basic = round(fixed_ctc * 0.40)
+    hra = round(basic * 0.50)
+    employer_pf = round(basic * 0.12)
+    gratuity = round(basic * 0.0481)
+    return s.model_copy(
+        update={
+            "basic": basic,
+            "hra": hra,
+            "employer_pf": employer_pf,
+            "gratuity": gratuity,
+            "special_allowance": fixed_ctc - basic - hra - employer_pf - gratuity,
+        }
+    )
+
+
+def needs_estimated_split(s: SalaryStructure) -> bool:
+    """True when the letter gives a CTC but no fixed-pay components at all."""
+    fixed = s.basic + s.hra + s.special_allowance + s.lta + s.meal_allowance + s.other_allowances
+    return s.ctc > 0 and fixed <= 0
+
+
 def ctc_inclusion(s: SalaryStructure, recurring_ctc: float) -> tuple[bool, bool]:
     """Whether the stated CTC includes the joining bonus / ESOPs, inferred from the gap between the
     stated CTC and the recurring components. Letters differ, so we check which combination fits."""

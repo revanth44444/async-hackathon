@@ -99,3 +99,15 @@ def test_sample_letters_load_privately():
         r = c.post("/api/offers/sample/nimbus")
         assert r.status_code == 201 and r.json()["source"] == "sample"
         assert c.post("/api/offers/sample/nope").status_code == 404
+
+
+def test_letter_with_only_a_ctc_gets_an_estimated_split():
+    # Fictional letter that states "Annual CTC ₹6,50,000" and nothing else
+    with TestClient(app, headers=ME) as c, open(SAMPLES / "ctc_only_offer.pdf", "rb") as f:
+        r = c.post("/api/offers/upload", files={"file": ("ctc_only_offer.pdf", f, "application/pdf")})
+        assert r.status_code == 201, r.text
+        d = r.json()
+        assert d["structure"]["ctc"] == 650_000
+        assert d["extraction_meta"]["estimated_split"] is True
+        assert d["result"]["monthly_in_hand"] > 40_000
+        assert d["result"]["warnings"] == []

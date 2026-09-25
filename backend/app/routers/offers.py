@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.db import get_db
 from app.deps import client_id
-from app.engine.calculator import calculate
+from app.engine.calculator import calculate, estimate_split, needs_estimated_split
 from app.engine.insights import Suggestion, suggestions
 from app.engine.schemas import Assumptions, CalculationResult, SalaryStructure
 from app.models import Offer
@@ -118,6 +118,14 @@ def _create_from_text(db: Session, owner: str, text: str, source: str, label: st
     structure, meta = extract_structure(text)
     if structure.ctc <= 0 and structure.basic <= 0 and structure.special_allowance <= 0:
         raise HTTPException(422, "Couldn't find salary figures in this document. Try entering the components manually.")
+    if needs_estimated_split(structure):
+        # Letter states only the CTC: estimate a standard split and say so, rather than computing on ₹0
+        structure = estimate_split(structure)
+        meta["estimated_split"] = True
+        meta.setdefault("notes", []).insert(
+            0, "The letter states only the total CTC, so the salary split shown is a typical estimate. "
+            "Use Edit to enter the exact components from your salary annexure or first payslip.",
+        )
     record_activity(db)
     a = Assumptions(state=meta.get("state") or "KA", metro=meta.get("metro", False))
     default_label = " · ".join(x for x in (structure.company, structure.role) if x) or (filename or "Untitled offer")
@@ -182,8 +190,11 @@ def create_sample(name: str, owner: str = Depends(client_id), db: Session = Depe
 @router.post("", response_model=OfferDetail, status_code=201)
 def create_manual(body: ManualCreate, owner: str = Depends(client_id), db: Session = Depends(get_db)):
     s = body.structure
+    meta: dict = {"method": "manual"}
+    if needs_estimated_split(s):
+        s, meta["estimated_split"] = estimate_split(s), True
     record_activity(db)
-    o = Offer(owner_id=owner, label=body.label or s.company or "Manual offer", source="manual", extraction_meta={"method": "manual"})
+    o = Offer(owner_id=owner, label=body.label or s.company or "Manual offer", source="manual", extraction_meta=meta)
     _apply(o, s, body.assumptions)
     db.add(o)
     db.commit()

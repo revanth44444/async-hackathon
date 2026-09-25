@@ -4,7 +4,18 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { CtcDonut } from "@/components/charts";
-import { AskBox, BreakdownEditor, Explanation, LetterNotes, RegimePanel, StatRow, Suggestions, Warnings } from "@/components/OfferSections";
+import {
+  AskBox,
+  BreakdownEditor,
+  EstimateNotice,
+  Explanation,
+  LetterNotes,
+  RegimeGuide,
+  RegimePanel,
+  StatRow,
+  Suggestions,
+  Warnings,
+} from "@/components/OfferSections";
 import { Simulator } from "@/components/Simulator";
 import { api, type OfferDetail } from "@/lib/api";
 import { inr, lakh } from "@/lib/format";
@@ -83,6 +94,7 @@ export default function OfferPage() {
       <div className="wrap space-y-24 pt-16">
         <div className="space-y-6">
           <StatRow r={r} />
+          {offer.extraction_meta.estimated_split && <EstimateNotice />}
           <Warnings items={r.warnings} />
         </div>
 
@@ -95,6 +107,8 @@ export default function OfferPage() {
           </div>
           <RegimePanel r={r} />
         </section>
+
+        <RegimeGuide r={r} />
 
         <Simulator key={`sim-${version}`} offer={offer} onSaved={setOffer} />
 
