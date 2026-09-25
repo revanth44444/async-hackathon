@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+.pytest_cache/
+tests/
+samples/*.py
+*.db
+.env
+.env.local
+.vercel
+.agents/
+.claude/
+skills-lock.json

@@ -1,0 +1,25 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+backend/.env
+backend/*.db
+
+# Node
+node_modules/
+.next/
+frontend/.env
+frontend/.env*.local
+next-env.d.ts
+
+.DS_Store
+
+# Vercel CLI leftovers
+backend/.agents/
+backend/.claude/
+backend/skills-lock.json
+backend/.vercel/
+backend/.env*
+!backend/.env.example
+frontend/.vercel/

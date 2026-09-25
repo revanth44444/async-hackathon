@@ -1,0 +1,134 @@
+"""Simulations, deterministic tax-saving suggestions and offer comparison."""
+from pydantic import BaseModel
+
+from app.engine.calculator import calculate
+from app.engine.schemas import Assumptions, CalculationResult, SalaryStructure
+
+CASH_FIELDS = ("basic", "hra", "special_allowance", "lta", "meal_allowance", "other_allowances")
+SCALABLE = CASH_FIELDS + ("ctc", "employer_pf", "gratuity", "employer_nps", "variable_pay")
+
+
+class Suggestion(BaseModel):
+    title: str
+    detail: str
+    annual_impact: float  # positive = more money / less tax
+
+
+class Delta(BaseModel):
+    monthly_in_hand: float
+    annual_take_home: float
+    income_tax: float
+
+
+class SimulationResult(BaseModel):
+    baseline: CalculationResult
+    scenario: CalculationResult
+    delta: Delta
+
+
+def apply_hike(s: SalaryStructure, pct: float) -> SalaryStructure:
+    f = 1 + pct / 100
+    return s.model_copy(update={k: getattr(s, k) * f for k in SCALABLE})
+
+
+def simulate(
+    s: SalaryStructure,
+    base_a: Assumptions,
+    scenario_a: Assumptions,
+    hike_pct: float = 0,
+    overrides: dict | None = None,
+) -> SimulationResult:
+    baseline = calculate(s, base_a)
+    scen_s = apply_hike(s, hike_pct).model_copy(update=overrides or {})
+    scenario = calculate(scen_s, scenario_a)
+    tax = lambda r: r.regimes[r.selected_regime].tax.total_tax  # noqa: E731
+    return SimulationResult(
+        baseline=baseline,
+        scenario=scenario,
+        delta=Delta(
+            monthly_in_hand=round(scenario.monthly_in_hand - baseline.monthly_in_hand, 2),
+            annual_take_home=round(scenario.annual_take_home - baseline.annual_take_home, 2),
+            income_tax=round(tax(scenario) - tax(baseline), 2),
+        ),
+    )
+
+
+def suggestions(s: SalaryStructure, a: Assumptions) -> list[Suggestion]:
+    base = calculate(s, a)
+    base_tax = base.regimes[base.selected_regime].tax.total_tax
+    out: list[Suggestion] = []
+
+    if a.regime != "auto" and base.selected_regime != base.recommended_regime and base.regime_savings > 0:
+        out.append(
+            Suggestion(
+                title=f"Switch to the {base.recommended_regime} regime",
+                detail=f"With your current inputs the {base.recommended_regime} regime costs less in tax.",
+                annual_impact=base.regime_savings,
+            )
+        )
+
+    # Restructure part of special allowance into employer NPS (80CCD(2), 14% of basic in new regime)
+    room = min(s.special_allowance, 0.14 * s.basic - s.employer_nps)
+    if room > 10_000 and base_tax > 0:
+        alt = calculate(s.model_copy(update={"special_allowance": s.special_allowance - room, "employer_nps": s.employer_nps + room}), a)
+        saved = base_tax - alt.regimes[alt.selected_regime].tax.total_tax
+        if saved > 1_000:
+            out.append(
+                Suggestion(
+                    title="Ask HR for the corporate NPS option",
+                    detail=f"Moving ₹{room:,.0f}/yr of special allowance into employer NPS saves about ₹{saved:,.0f} in tax. "
+                    "The money is locked in until retirement.",
+                    annual_impact=round(saved, 2),
+                )
+            )
+
+    old = base.regimes["old"].tax
+    if base.selected_regime == "old" or base.regime_savings < 50_000:
+        used_80c = next((d.amount for d in old.deductions if d.label.startswith("80C")), 0)
+        if used_80c < 150_000:
+            room_80c = 150_000 - used_80c
+            alt = calculate(s, a.model_copy(update={"investments_80c": a.investments_80c + room_80c, "regime": "old"}))
+            saved = old.total_tax - alt.regimes["old"].tax.total_tax
+            if saved > 1_000:
+                out.append(
+                    Suggestion(
+                        title="Fill your 80C limit (old regime)",
+                        detail=f"Investing another ₹{room_80c:,.0f} in ELSS/PPF would cut old-regime tax by about ₹{saved:,.0f}.",
+                        annual_impact=round(saved, 2),
+                    )
+                )
+
+    if s.variable_pay > 0.15 * s.ctc:
+        out.append(
+            Suggestion(
+                title="Variable pay is a large share of CTC",
+                detail=f"{s.variable_pay / s.ctc:.0%} of your CTC is variable. Ask for the historical payout percentage, "
+                "or negotiate to move some of it into fixed pay.",
+                annual_impact=0,
+            )
+        )
+    return sorted(out, key=lambda x: -x.annual_impact)
+
+
+class CompareRow(BaseModel):
+    offer_id: int
+    label: str
+    result: CalculationResult
+
+
+class CompareResult(BaseModel):
+    rows: list[CompareRow]
+    best_monthly_in_hand: int
+    best_annual_take_home: int
+    best_year_one: int
+    verdict: str | None = None
+
+
+def compare_metrics(rows: list[CompareRow]) -> CompareResult:
+    best = lambda key: max(rows, key=lambda r: getattr(r.result, key)).offer_id  # noqa: E731
+    return CompareResult(
+        rows=rows,
+        best_monthly_in_hand=best("monthly_in_hand"),
+        best_annual_take_home=best("annual_take_home"),
+        best_year_one=best("year_one_take_home"),
+    )

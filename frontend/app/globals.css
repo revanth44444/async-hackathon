@@ -1,0 +1,179 @@
+@import "tailwindcss";
+
+/* OfferLens design language: Apple's cinematic dark hero and soft tiles, crossed with
+   Ralph Lauren's editorial serif, tracked uppercase labels and ivory/navy palette.
+   Rule: nothing is ever bold. Weights are 300 or 400 only. */
+
+:root {
+  --bg: #fbfaf7;
+  --surface: #ffffff;
+  --surface-2: #f3f2ee;
+  --border: #e4e1da;
+  --text: #1d1d1f;
+  --muted: #6e6e73;
+  --accent: #0f2340;
+  --accent-soft: #eceff4;
+  --good: #1f5c45;
+  --good-soft: #eef3ef;
+  --bad: #9c3b1c;
+  --bad-soft: #f8efe9;
+  --night: #000000;
+  --night-2: #161617;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--border);
+  --color-ink: var(--text);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-good: var(--good);
+  --color-good-soft: var(--good-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+  --color-night: var(--night);
+  --color-night-2: var(--night-2);
+  --font-sans: var(--font-inter), -apple-system, "SF Pro Text", system-ui, sans-serif;
+  --font-serif: var(--font-bodoni), "Didot", Georgia, serif;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-inter), -apple-system, "SF Pro Text", system-ui, sans-serif;
+  font-weight: 300;
+  letter-spacing: -0.005em;
+}
+
+/* No bold, anywhere, including markdown returned by the AI */
+h1, h2, h3, h4, h5, h6, strong, b, th, dt, summary, button, label {
+  font-weight: 400;
+}
+
+::selection {
+  background: var(--accent);
+  color: #fff;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+@layer components {
+  .wrap {
+    @apply mx-auto w-full max-w-6xl px-5 sm:px-8;
+  }
+  .serif {
+    font-family: var(--font-bodoni), "Didot", Georgia, serif;
+    font-weight: 400;
+    letter-spacing: -0.01em;
+  }
+  .eyebrow {
+    @apply text-[11px] uppercase tracking-[0.22em] text-muted;
+    font-weight: 400;
+  }
+  .card {
+    @apply rounded-[22px] bg-surface p-6 sm:p-8;
+    box-shadow: inset 0 0 0 1px var(--border);
+  }
+  .tile {
+    @apply rounded-[22px] bg-surface-2 p-6;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5 text-sm text-ink transition hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40;
+    box-shadow: inset 0 0 0 1px var(--border);
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-ink px-5 py-2.5 text-sm text-white transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .link-cta {
+    @apply inline-flex items-center gap-2 border-b border-current pb-1 text-[11px] uppercase tracking-[0.22em] transition hover:opacity-60;
+  }
+  .input {
+    @apply w-full border-0 border-b border-line bg-transparent px-0 py-2 text-[15px] text-ink outline-none transition placeholder:text-muted/60 focus:border-ink;
+    font-weight: 300;
+  }
+  .input-box {
+    @apply w-full rounded-2xl border border-line bg-surface px-4 py-3 text-sm text-ink outline-none transition focus:border-ink;
+    font-weight: 300;
+  }
+  .label {
+    @apply mb-1 block text-[10px] uppercase tracking-[0.2em] text-muted;
+  }
+  .section-title {
+    @apply text-2xl text-ink sm:text-[28px];
+    font-family: var(--font-bodoni), "Didot", Georgia, serif;
+    font-weight: 400;
+    letter-spacing: -0.01em;
+  }
+  .prose-offer {
+    @apply leading-relaxed;
+  }
+  .prose-offer h1,
+  .prose-offer h2,
+  .prose-offer h3,
+  .prose-offer h4 {
+    @apply mt-6 mb-2 text-lg first:mt-0;
+    font-family: var(--font-bodoni), "Didot", Georgia, serif;
+  }
+  .prose-offer p {
+    @apply mb-3;
+  }
+  .prose-offer ul,
+  .prose-offer ol {
+    @apply mb-3 ml-5 space-y-1.5;
+  }
+  .prose-offer ul {
+    @apply list-disc marker:text-line;
+  }
+  .prose-offer ol {
+    @apply list-decimal;
+  }
+  .prose-offer strong {
+    @apply text-ink;
+    font-weight: 400;
+  }
+}
+
+/* Apple-style spotlight for the hero */
+.spotlight {
+  background:
+    radial-gradient(ellipse 18% 55% at 50% 0%, rgba(255, 255, 255, 0.16), transparent 70%),
+    radial-gradient(ellipse 60% 40% at 50% 100%, rgba(15, 35, 64, 0.55), transparent 70%),
+    #000;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.rise {
+  animation: rise 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.rise-2 {
+  animation: rise 0.9s 0.15s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.rise-3 {
+  animation: rise 0.9s 0.3s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+input[type="range"] {
+  accent-color: var(--text);
+}
+input[type="checkbox"] {
+  accent-color: var(--text);
+}
