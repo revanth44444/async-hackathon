@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./offerlens.db"
     groq_api_key: str = ""
     groq_model: str = "openai/gpt-oss-120b"
+    groq_fallback_model: str = "openai/gpt-oss-20b"  # used when the main model is rate limited
     cors_origins: str = "http://localhost:3000"
     cors_origin_regex: str | None = None  # e.g. https://offerlens.*\.vercel\.app
     max_upload_mb: int = 10

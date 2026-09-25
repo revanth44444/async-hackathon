@@ -118,17 +118,38 @@ class CompareRow(BaseModel):
 
 class CompareResult(BaseModel):
     rows: list[CompareRow]
-    best_monthly_in_hand: str
-    best_annual_take_home: str
+    best_monthly_in_hand: str  # guaranteed: fixed pay after tax, PF and professional tax
+    best_annual_take_home: str  # includes variable pay at the assumed payout
     best_year_one: str
+    best_fixed_pay: str  # fixed pay before deductions
+    best_retirement: str
+    lowest_tax: str
     verdict: str | None = None
+
+    def winners(self) -> dict[str, str]:
+        """Human-readable metric → winning offer label, handed to the AI as settled facts."""
+        label = {r.offer_id: r.label for r in self.rows}
+        return {
+            "Highest guaranteed monthly in-hand (after tax and PF)": label[self.best_monthly_in_hand],
+            "Highest annual take-home if variable pay is paid as assumed": label[self.best_annual_take_home],
+            "Highest year-one take-home including joining bonus": label[self.best_year_one],
+            "Highest fixed pay before tax and PF": label[self.best_fixed_pay],
+            "Most retirement savings (PF + NPS)": label[self.best_retirement],
+            "Lowest income tax": label[self.lowest_tax],
+        }
 
 
 def compare_metrics(rows: list[CompareRow]) -> CompareResult:
-    best = lambda key: max(rows, key=lambda r: getattr(r.result, key)).offer_id  # noqa: E731
+    def best(key, lowest=False):
+        pick = min if lowest else max
+        return pick(rows, key=lambda r: key(r.result)).offer_id
+
     return CompareResult(
         rows=rows,
-        best_monthly_in_hand=best("monthly_in_hand"),
-        best_annual_take_home=best("annual_take_home"),
-        best_year_one=best("year_one_take_home"),
+        best_monthly_in_hand=best(lambda r: r.monthly_in_hand),
+        best_annual_take_home=best(lambda r: r.annual_take_home),
+        best_year_one=best(lambda r: r.year_one_take_home),
+        best_fixed_pay=best(lambda r: r.fixed_cash),
+        best_retirement=best(lambda r: r.employee_pf + r.structure.employer_pf + r.structure.employer_nps),
+        lowest_tax=best(lambda r: r.regimes[r.selected_regime].tax.total_tax, lowest=True),
     )
