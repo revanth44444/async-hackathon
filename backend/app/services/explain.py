@@ -253,13 +253,13 @@ def tradeoffs(labelled: list[tuple[str, CalculationResult]]) -> str:
         s = r.structure
         parts = [f"{inr(r.monthly_in_hand)} a month guaranteed in hand"]
         parts.append(
-            f"variable pay of {money(s.variable_pay)} ({s.variable_pay / s.ctc:.0%} of CTC), not guaranteed"
+            f"variable pay of {inr(s.variable_pay)}, {s.variable_pay / s.ctc:.0%} of CTC, not guaranteed"
             if s.variable_pay > 0 and s.ctc > 0 else "no variable pay"
         )
         if s.esop_value > 0:
-            parts.append(f"ESOPs/RSUs of {money(s.esop_value)} a year, not cash")
+            parts.append(f"ESOPs/RSUs of {inr(s.esop_value)} a year, not cash")
         if s.joining_bonus > 0:
-            parts.append(f"a one-time joining bonus of {money(s.joining_bonus)}")
+            parts.append(f"a one-time joining bonus of {inr(s.joining_bonus)}")
         lines.append(f"- {label}: {'; '.join(parts)}.")
     return "\n".join(lines)
 

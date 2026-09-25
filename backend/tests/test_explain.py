@@ -74,12 +74,12 @@ def test_suitability_splits_when_different_offers_lead():
 
 
 def test_compare_verdict_attributes_each_figure_to_its_own_offer():
-    from app.services.explain import compare_verdict, money
+    from app.services.explain import compare_verdict
     res = _compare(NIMBUS, QUANTORA.model_copy(update={"esop_value": 636_000}))
     labelled = [(r.label, r.result) for r in res.rows]
     v = compare_verdict(labelled, res.winners(), res.suitability())
     nimbus_line = next(l for l in v.splitlines() if l.startswith("- Offer 0:"))
     quantora_line = next(l for l in v.splitlines() if l.startswith("- Offer 1:"))
-    assert "ESOP" not in nimbus_line and money(636_000) in quantora_line
-    assert money(100_000) in nimbus_line and "joining" not in quantora_line
+    assert "ESOP" not in nimbus_line and inr(636_000) in quantora_line
+    assert inr(100_000) in nimbus_line and "joining" not in quantora_line
     assert v.endswith(res.suitability())
