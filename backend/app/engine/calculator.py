@@ -88,9 +88,24 @@ def complete_structure(s: SalaryStructure, stated_gross: float = 0.0) -> tuple[S
     if 0 < stated_gross < MIN_PLAUSIBLE_ANNUAL_CTC:
         stated_gross *= 12
 
-    if fixed <= 0 and s.ctc > 0:
+    # Fixed pay the CTC leaves after variable pay, one-time items, benefits and NPS
+    fixed_ctc = s.ctc - s.variable_pay - s.joining_bonus - s.retention_bonus - s.esop_value - s.insurance - s.employer_nps
+
+    if fixed <= 0 and s.ctc > 0 and 0 < stated_gross < fixed_ctc:
+        # CTC and gross, no breakup: the letter's own gross is the fixed cash, so split that, derive PF and
+        # gratuity from its basic, and treat what's left of the CTC as benefits (insurance and the like)
+        s = s.model_copy(update=_typical_split(stated_gross))
+        s.employer_pf = s.employer_pf or round(s.basic * 0.12)
+        s.gratuity = s.gratuity or round(s.basic * 0.0481)
+        rest = round(fixed_ctc - stated_gross - s.employer_pf - s.gratuity)
+        if rest > 0:
+            s.insurance += rest
+        estimates.append({"kind": "gross", "amount": stated_gross,
+                          "message": f"The letter gives a gross salary of {inr(stated_gross)} a year and a CTC of "
+                          f"{inr(s.ctc)} but no breakup. We split the gross in a typical way (basic 40%, HRA half of "
+                          "basic, 12% PF) and treated the rest of the CTC as PF, gratuity and benefits."})
+    elif fixed <= 0 and s.ctc > 0:
         # CTC only: split the fixed part of the CTC, with employer PF and gratuity inside it
-        fixed_ctc = s.ctc - s.variable_pay - s.joining_bonus - s.retention_bonus - s.esop_value - s.insurance - s.employer_nps
         # fixed_ctc = fixed pay + 12% PF + 4.81% gratuity on basic (basic = 40% of fixed pay)
         fixed_pay = fixed_ctc / (1 + 0.40 * (0.12 + 0.0481))
         s = s.model_copy(update=_typical_split(fixed_pay))

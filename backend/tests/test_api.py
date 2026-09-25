@@ -254,3 +254,14 @@ def test_compare_reports_ties_instead_of_picking_one():
         assert cmp["best_retirement"] is None and cmp["lowest_tax"] is None  # same PF, both ₹0 tax
         assert cmp["best_monthly_in_hand"] == b["id"]
         assert "Tied on most retirement savings" in cmp["verdict"] and "Tied on lowest income tax" in cmp["verdict"]
+
+
+def test_letter_with_ctc_and_monthly_gross_uses_the_gross():
+    text = ("Congratulations! We are happy to offer you the Software Engineer role at Zentrix Labs Pvt Ltd, Chennai. "
+            "Your annual CTC will be Rs 12,00,000. Your monthly gross salary will be Rs 81,000.")
+    with TestClient(app, headers=ME) as c:
+        d = c.post("/api/offers/text", json={"text": text}).json()
+        s = d["structure"]
+        assert s["basic"] + s["hra"] + s["special_allowance"] == 972_000
+        assert d["extraction_meta"]["estimated_split"] is True
+        assert d["result"]["monthly_in_hand"] < 81_000 - 3_888 + 1

@@ -170,3 +170,21 @@ def test_esop_total_grant_is_annualised():
     assert s.esop_value == 636_000
     # Already annual: left alone
     assert _annualise_esop(SalaryStructure(ctc=1_941_000, esop_value=636_000), text).esop_value == 636_000
+
+
+def test_ctc_and_gross_without_breakup_splits_the_stated_gross():
+    # "12 LPA including a ₹1.2L bonus; monthly gross ₹81,000" — the letter's own gross must be the fixed cash
+    s, est = complete_structure(SalaryStructure(ctc=1_200_000, variable_pay=120_000), stated_gross=81_000)
+    fixed = s.basic + s.hra + s.special_allowance
+    assert fixed == 972_000 and s.basic == 388_800
+    assert s.employer_pf == 46_656 and s.gratuity == round(388_800 * 0.0481)
+    assert s.insurance == 1_080_000 - 972_000 - 46_656 - s.gratuity  # the rest of the CTC is benefits
+    assert [e["kind"] for e in est] == ["gross"] and "gross salary" in est[0]["message"]
+    r = calculate(s)
+    assert r.warnings == []
+    assert round(r.monthly_in_hand) == round((972_000 - 46_656 - r.professional_tax) / 12)
+
+
+def test_implausible_gross_above_ctc_falls_back_to_ctc_split():
+    s, est = complete_structure(SalaryStructure(ctc=1_200_000), stated_gross=1_500_000)
+    assert [e["kind"] for e in est] == ["split"]
