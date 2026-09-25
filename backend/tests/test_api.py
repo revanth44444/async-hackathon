@@ -30,7 +30,7 @@ def test_full_flow():
 
         cmp = c.post("/api/compare", json={"offer_ids": [a["id"], b["id"]]}).json()
         assert cmp["best_monthly_in_hand"] == b["id"]
-        assert cmp["verdict"].startswith("### Where each offer leads")  # deterministic fallback without AI
+        assert cmp["verdict"].startswith("### The trade-offs") and "### Where each offer leads" in cmp["verdict"]
 
         sim = c.post("/api/simulate", json={"offer_id": a["id"], "hike_pct": 10}).json()
         assert sim["delta"]["monthly_in_hand"] > 0

@@ -246,35 +246,32 @@ def answer_question(r: CalculationResult, question: str, raw_text: str | None) -
     return text or "I couldn't answer that reliably from the calculated figures. The breakdown on this page has the exact numbers."
 
 
-def compare_verdict(labelled: list[tuple[str, CalculationResult]], winners: dict[str, str], suits: str) -> str:
-    """AI trade-off discussion followed by the winners list and recommendation. The last two are decided
-    and written in Python, so the model can never misstate who leads on what."""
-    data = {label: facts(r) for label, r in labelled}
-    offer_rules = {label: rules(r) for label, r in labelled}
-    prompt = (
-        "Compare these offers for the candidate in under 150 words. Discuss guaranteed monthly in-hand pay, variable "
-        "risk, long-term and non-cash value, and one-time bonuses, using the figures in DATA. A list of which offer "
-        "leads on each measure, and the final recommendation, are shown to the reader separately right after your "
-        "text: do not list winners, do not write a conclusion or recommendation, and never call an offer the highest, "
-        "lowest, most, best or better on any measure. Contradicting the WINNERS below is never allowed.\n\n"
-        f"WINNERS:\n{json.dumps(winners, ensure_ascii=False)}\n\nDATA:\n{json.dumps(data, ensure_ascii=False)}\n\n"
-        f"RULES:\n{json.dumps(offer_rules, ensure_ascii=False)}"
-    )
-    try:
-        text = verified_chat(
-            [{"role": "system", "content": SYSTEM}, {"role": "user", "content": prompt}],
-            allowed_amounts([r for _, r in labelled], prompt),
-            temperature=0.2,
-            max_tokens=800,
+def tradeoffs(labelled: list[tuple[str, CalculationResult]]) -> str:
+    """Per-offer facts on the risky and non-cash parts of each package, written from the numbers directly."""
+    lines = ["### The trade-offs\n"]
+    for label, r in labelled:
+        s = r.structure
+        parts = [f"{inr(r.monthly_in_hand)} a month guaranteed in hand"]
+        parts.append(
+            f"variable pay of {money(s.variable_pay)} ({s.variable_pay / s.ctc:.0%} of CTC), not guaranteed"
+            if s.variable_pay > 0 and s.ctc > 0 else "no variable pay"
         )
-    except AIUnavailable:
-        text = None
-    summary = winners_summary(winners, suits)
-    return f"### The trade-offs\n\n{text.strip()}\n\n{summary}" if text else summary
+        if s.esop_value > 0:
+            parts.append(f"ESOPs/RSUs of {money(s.esop_value)} a year, not cash")
+        if s.joining_bonus > 0:
+            parts.append(f"a one-time joining bonus of {money(s.joining_bonus)}")
+        lines.append(f"- {label}: {'; '.join(parts)}.")
+    return "\n".join(lines)
+
+
+def compare_verdict(labelled: list[tuple[str, CalculationResult]], winners: dict[str, str], suits: str) -> str:
+    """Written entirely from computed figures. An AI version attached real amounts to the wrong offer
+    (e.g. one offer's ESOPs to another), which amount verification can't catch, so none is used here."""
+    return f"{tradeoffs(labelled)}\n\n{winners_summary(winners, suits)}"
 
 
 def winners_summary(winners: dict[str, str], suits: str) -> str:
-    """Who leads on what, plus the recommendation. Always shown; the whole verdict when the AI is unavailable."""
+    """Who leads on what, plus the recommendation."""
     by_offer: dict[str, list[str]] = {}
     for metric, label in winners.items():
         by_offer.setdefault(label, []).append(metric[0].lower() + metric[1:])

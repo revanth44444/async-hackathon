@@ -73,17 +73,13 @@ def test_suitability_splits_when_different_offers_lead():
     assert "For certainty, Offer 0" in suits and "variable pay, Offer 1" in suits
 
 
-def test_compare_verdict_always_ends_with_python_winners(monkeypatch):
-    import app.services.explain as ex
-    res = _compare(NIMBUS, QUANTORA)
+def test_compare_verdict_attributes_each_figure_to_its_own_offer():
+    from app.services.explain import compare_verdict, money
+    res = _compare(NIMBUS, QUANTORA.model_copy(update={"esop_value": 636_000}))
     labelled = [(r.label, r.result) for r in res.rows]
-    monkeypatch.setattr(ex, "chat", lambda *a, **k: "Both offers trade fixed pay against variable pay.")
-    v = ex.compare_verdict(labelled, res.winners(), res.suitability())
-    assert v.startswith("### The trade-offs") and v.endswith(res.suitability())
-    for metric, label in res.winners().items():
-        assert f"{label}:" in v and metric[1:] in v
-
-    def down(*a, **k):
-        raise ex.AIUnavailable("down")
-    monkeypatch.setattr(ex, "chat", down)
-    assert ex.compare_verdict(labelled, res.winners(), res.suitability()) == ex.winners_summary(res.winners(), res.suitability())
+    v = compare_verdict(labelled, res.winners(), res.suitability())
+    nimbus_line = next(l for l in v.splitlines() if l.startswith("- Offer 0:"))
+    quantora_line = next(l for l in v.splitlines() if l.startswith("- Offer 1:"))
+    assert "ESOP" not in nimbus_line and money(636_000) in quantora_line
+    assert money(100_000) in nimbus_line and "joining" not in quantora_line
+    assert v.endswith(res.suitability())
