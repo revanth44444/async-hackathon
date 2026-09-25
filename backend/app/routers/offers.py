@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.db import get_db
 from app.deps import client_id
-from app.engine.calculator import calculate, estimate_split, needs_estimated_split
+from app.engine.calculator import calculate, complete_structure
 from app.engine.insights import Suggestion, suggestions
 from app.engine.schemas import Assumptions, CalculationResult, SalaryStructure
 from app.models import Offer
@@ -107,6 +107,12 @@ SAMPLES = {"nimbus": "nimbus_offer.pdf", "quantora": "quantora_offer.pdf"}
 SAMPLES_DIR = Path(__file__).resolve().parents[2] / "samples"
 
 
+def _record_estimates(meta: dict, estimates: list[dict]) -> None:
+    """Store what was guessed so the page and the AI explanation can say so plainly."""
+    meta["estimates"] = estimates
+    meta["estimated_split"] = any(e["kind"] in ("split", "gross") for e in estimates)
+
+
 def _get(db: Session, offer_id: str, owner: str) -> Offer:
     o = db.get(Offer, offer_id)
     if not o or o.owner_id != owner:  # same 404 either way, so IDs can't be probed
@@ -116,16 +122,14 @@ def _get(db: Session, offer_id: str, owner: str) -> Offer:
 
 def _create_from_text(db: Session, owner: str, text: str, source: str, label: str | None, filename: str | None) -> Offer:
     structure, meta = extract_structure(text)
+    structure, estimates = complete_structure(structure, meta.get("stated_gross_annual") or 0)
     if structure.ctc <= 0 and structure.basic <= 0 and structure.special_allowance <= 0:
-        raise HTTPException(422, "Couldn't find salary figures in this document. Try entering the components manually.")
-    if needs_estimated_split(structure):
-        # Letter states only the CTC: estimate a standard split and say so, rather than computing on ₹0
-        structure = estimate_split(structure)
-        meta["estimated_split"] = True
-        meta.setdefault("notes", []).insert(
-            0, "The letter states only the total CTC, so the salary split shown is a typical estimate. "
-            "Use Edit to enter the exact components from your salary annexure or first payslip.",
+        raise HTTPException(
+            422,
+            "We couldn't find a CTC, gross salary or salary breakup in this document. "
+            "Try pasting the compensation section, or enter your CTC manually.",
         )
+    _record_estimates(meta, estimates)
     record_activity(db)
     a = Assumptions(state=meta.get("state") or "KA", metro=meta.get("metro", False))
     default_label = " · ".join(x for x in (structure.company, structure.role) if x) or (filename or "Untitled offer")
@@ -191,8 +195,8 @@ def create_sample(name: str, owner: str = Depends(client_id), db: Session = Depe
 def create_manual(body: ManualCreate, owner: str = Depends(client_id), db: Session = Depends(get_db)):
     s = body.structure
     meta: dict = {"method": "manual"}
-    if needs_estimated_split(s):
-        s, meta["estimated_split"] = estimate_split(s), True
+    s, estimates = complete_structure(s)
+    _record_estimates(meta, estimates)
     record_activity(db)
     o = Offer(owner_id=owner, label=body.label or s.company or "Manual offer", source="manual", extraction_meta=meta)
     _apply(o, s, body.assumptions)
@@ -212,11 +216,14 @@ def update_offer(offer_id: str, body: OfferUpdate, owner: str = Depends(client_i
     if body.label:
         o.label = body.label
     if body.structure or body.assumptions:
-        _apply(
-            o,
-            body.structure or SalaryStructure(**o.structure),
-            body.assumptions or Assumptions(**o.assumptions),
-        )
+        s = body.structure or SalaryStructure(**o.structure)
+        if body.structure:
+            # Values the user typed are kept as-is; only a fully empty breakup is re-estimated
+            s, estimates = complete_structure(s) if sum(getattr(s, k) for k in ("basic", "hra", "special_allowance")) <= 0 else (s, [])
+            meta = dict(o.extraction_meta or {})
+            _record_estimates(meta, estimates)
+            o.extraction_meta = meta
+        _apply(o, s, body.assumptions or Assumptions(**o.assumptions))
     db.commit()
     return _detail(o)
 
@@ -232,7 +239,9 @@ def explain(offer_id: str, refresh: bool = False, owner: str = Depends(client_id
     o = _get(db, offer_id, owner)
     if o.explanation and not refresh:
         return {"explanation": o.explanation, "cached": True}
-    text, method = explain_offer(CalculationResult(**o.result), (o.extraction_meta or {}).get("notes"))
+    meta = o.extraction_meta or {}
+    notes = [e["message"] for e in meta.get("estimates", [])] + (meta.get("notes") or [])
+    text, method = explain_offer(CalculationResult(**o.result), notes)
     if method == "ai":  # don't cache the fallback, so adding a key later upgrades it
         o.explanation = text
         db.commit()

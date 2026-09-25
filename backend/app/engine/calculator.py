@@ -48,29 +48,72 @@ def inr(v: float) -> str:
     return f"{sign}₹{s}"
 
 
-def estimate_split(s: SalaryStructure) -> SalaryStructure:
-    """Fill a typical Indian salary split when a letter states only the CTC. The result is flagged as an
-    estimate by the caller. Basic 40% of fixed CTC, HRA 50% of basic, PF 12% and gratuity 4.81% of basic."""
-    fixed_ctc = s.ctc - s.variable_pay - s.joining_bonus - s.esop_value - s.insurance
-    basic = round(fixed_ctc * 0.40)
+FIXED_KEYS = ("basic", "hra", "special_allowance", "lta", "meal_allowance", "other_allowances")
+MIN_PLAUSIBLE_ANNUAL_CTC = 1_00_000  # below this, a lone "CTC" figure is almost certainly monthly
+
+
+def _fixed(s: SalaryStructure) -> float:
+    return sum(getattr(s, k) for k in FIXED_KEYS)
+
+
+def _typical_split(fixed_pay: float) -> dict[str, float]:
+    """Typical Indian structure for a fixed-pay amount: basic 40%, HRA half of basic, rest special allowance."""
+    basic = round(fixed_pay * 0.40)
     hra = round(basic * 0.50)
-    employer_pf = round(basic * 0.12)
-    gratuity = round(basic * 0.0481)
-    return s.model_copy(
-        update={
-            "basic": basic,
-            "hra": hra,
-            "employer_pf": employer_pf,
-            "gratuity": gratuity,
-            "special_allowance": fixed_ctc - basic - hra - employer_pf - gratuity,
-        }
-    )
+    return {"basic": basic, "hra": hra, "special_allowance": round(fixed_pay - basic - hra)}
 
 
-def needs_estimated_split(s: SalaryStructure) -> bool:
-    """True when the letter gives a CTC but no fixed-pay components at all."""
-    fixed = s.basic + s.hra + s.special_allowance + s.lta + s.meal_allowance + s.other_allowances
-    return s.ctc > 0 and fixed <= 0
+def complete_structure(s: SalaryStructure, stated_gross: float = 0.0) -> tuple[SalaryStructure, list[dict]]:
+    """Make an incomplete letter calculable instead of producing ₹0.
+
+    Handles, in order: a monthly CTC written without saying so, a CTC with no breakup, a gross salary with no
+    CTC, and a partial breakup that leaves part of the CTC unaccounted for. Every assumption is returned as an
+    estimate record so the UI and AI can say exactly what was guessed.
+    """
+    estimates: list[dict] = []
+    s = s.model_copy()
+    fixed = _fixed(s)
+
+    if 0 < s.ctc < MIN_PLAUSIBLE_ANNUAL_CTC and fixed <= 0:
+        estimates.append({"kind": "monthly_ctc", "amount": s.ctc * 12,
+                          "message": f"The CTC of {inr(s.ctc)} looks like a monthly figure, so we used {inr(s.ctc * 12)} a year."})
+        s.ctc *= 12
+    if 0 < stated_gross < MIN_PLAUSIBLE_ANNUAL_CTC:
+        stated_gross *= 12
+
+    if fixed <= 0 and s.ctc > 0:
+        # CTC only: split the fixed part of the CTC, with employer PF and gratuity inside it
+        fixed_ctc = s.ctc - s.variable_pay - s.joining_bonus - s.esop_value - s.insurance - s.employer_nps
+        # fixed_ctc = fixed pay + 12% PF + 4.81% gratuity on basic (basic = 40% of fixed pay)
+        fixed_pay = fixed_ctc / (1 + 0.40 * (0.12 + 0.0481))
+        s = s.model_copy(update=_typical_split(fixed_pay))
+        if s.employer_pf <= 0:
+            s.employer_pf = round(s.basic * 0.12)
+        if s.gratuity <= 0:
+            s.gratuity = round(s.basic * 0.0481)
+        s.special_allowance += round(fixed_ctc - _fixed(s) - s.employer_pf - s.gratuity)  # absorb rounding
+        estimates.append({"kind": "split", "amount": s.ctc,
+                          "message": "The letter states only the total CTC, so the salary split is a typical estimate "
+                          "(basic 40% of fixed pay, HRA half of basic, 12% PF)."})
+    elif fixed <= 0 and stated_gross > 0:
+        # Gross only: the gross is the fixed cash; employer PF and gratuity sit on top to form the CTC
+        s = s.model_copy(update=_typical_split(stated_gross))
+        s.employer_pf = s.employer_pf or round(s.basic * 0.12)
+        s.gratuity = s.gratuity or round(s.basic * 0.0481)
+        s.ctc = 0  # derived from the components below
+        estimates.append({"kind": "gross", "amount": stated_gross,
+                          "message": f"The letter states a gross salary of {inr(stated_gross)} a year but no CTC or "
+                          "breakup, so the split is a typical estimate and the CTC is derived from it."})
+    elif fixed > 0 and s.ctc > 0:
+        recurring = fixed + s.employer_pf + s.gratuity + s.employer_nps + s.insurance + s.variable_pay
+        joining_in, esop_in = ctc_inclusion(s, recurring)
+        gap = s.ctc - recurring - (s.joining_bonus if joining_in else 0) - (s.esop_value if esop_in else 0)
+        if gap > 0.01 * s.ctc:
+            s.special_allowance += round(gap)
+            estimates.append({"kind": "balance", "amount": round(gap),
+                              "message": f"{inr(gap)} of the stated CTC wasn't itemised in the letter. We added it to "
+                              "special allowance, which is how most companies balance a CTC."})
+    return s, estimates
 
 
 def ctc_inclusion(s: SalaryStructure, recurring_ctc: float) -> tuple[bool, bool]:

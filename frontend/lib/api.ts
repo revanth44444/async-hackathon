@@ -125,6 +125,7 @@ export interface ExtractionMeta {
   components?: { label: string; annual_amount: number; category: string }[];
   notes?: string[];
   estimated_split?: boolean;
+  estimates?: { kind: "split" | "gross" | "balance" | "monthly_ctc"; amount: number; message: string }[];
 }
 
 export interface OfferDetail extends OfferSummary {

@@ -23,16 +23,6 @@ const MANUAL_FIELDS: { key: keyof SalaryStructure; label: string }[] = [
   { key: "joining_bonus", label: "Joining bonus" },
 ];
 
-/** Typical Indian CTC split, used only when the user gives just a CTC number. */
-function typicalSplit(ctc: number, variable: number): Partial<SalaryStructure> {
-  const fixed = ctc - variable;
-  const basic = Math.round(fixed * 0.4);
-  const hra = Math.round(basic * 0.5);
-  const employer_pf = Math.round(basic * 0.12);
-  const gratuity = Math.round(basic * 0.0481);
-  return { basic, hra, employer_pf, gratuity, special_allowance: fixed - basic - hra - employer_pf - gratuity };
-}
-
 export function NewOffer() {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("upload");
@@ -81,8 +71,8 @@ export function NewOffer() {
       location: manual.location || null,
     };
     for (const f of MANUAL_FIELDS) (structure as Record<string, unknown>)[f.key] = num(f.key);
-    const full = num("basic") > 0 ? structure : { ...structure, ...typicalSplit(ctc, num("variable_pay")) };
-    run(() => api.createManual(full, undefined, manual.company || undefined));
+    // Missing breakup is estimated by the backend (and labelled as an estimate on the offer page)
+    run(() => api.createManual(structure, undefined, manual.company || undefined));
   }
 
   return (

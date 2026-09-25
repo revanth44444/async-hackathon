@@ -429,15 +429,18 @@ export function LetterNotes({ notes }: { notes?: string[] }) {
   );
 }
 
-export function EstimateNotice() {
+export function EstimateNotice({ messages }: { messages: string[] }) {
+  if (!messages.length) return null;
   return (
-    <div className="flex flex-col gap-3 rounded-[22px] bg-surface-2 p-6 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-4 rounded-[22px] bg-surface-2 p-6 sm:flex-row sm:items-center sm:justify-between">
       <div>
-        <p className="eyebrow">Estimated split</p>
-        <p className="mt-2 max-w-2xl text-sm text-ink/80">
-          Your letter states only the total CTC, so we used a typical structure: basic at 40% of fixed pay, HRA at half of
-          basic and 12% PF. Enter the exact components from your salary annexure for precise figures.
-        </p>
+        <p className="eyebrow">Estimated from an incomplete letter</p>
+        <ul className="mt-2 max-w-2xl space-y-1 text-sm text-ink/80">
+          {messages.map((m) => (
+            <li key={m}>{m}</li>
+          ))}
+        </ul>
+        <p className="mt-2 text-sm text-muted">Enter the exact figures from your salary annexure or first payslip for precise results.</p>
       </div>
       <a href="#components" className="link-cta shrink-0">
         Edit components

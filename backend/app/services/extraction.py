@@ -23,12 +23,16 @@ Return ONLY a JSON object with this shape:
   "company": string|null, "role": string|null, "location": string|null (city),
   "candidate_name": string|null, "joining_date": string|null,
   "stated_ctc_annual": number|null,
+  "stated_gross_annual": number|null,
   "components": [{{"label": string, "annual_amount": number, "category": string}}],
   "notes": [string]
 }}
 Rules:
 - category must be one of: {", ".join(CATEGORIES)}.
 - annual_amount is the ANNUAL amount in INR as a plain number. If only a monthly figure is given, multiply by 12.
+- stated_ctc_annual and stated_gross_annual are ANNUAL too: a "monthly CTC" or "gross per month" must be multiplied by 12.
+  stated_gross_annual is the gross / total fixed salary if the letter states one, else null.
+- If a sentence says the CTC includes a bonus or variable pay, list that amount as a variable_pay component.
   Convert "12 LPA"/"12 lakhs" → 1200000, "1.2 Cr" → 12000000.
 - List every individual pay component exactly once. Use category "ignore" for subtotals and totals
   (Gross, Total Fixed, CTC, Net) so nothing is double counted.
@@ -75,6 +79,13 @@ def _aggregate(data: dict) -> SalaryStructure:
     )
 
 
+def _num(v) -> float:
+    try:
+        return max(0.0, float(v or 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _extract_ai(text: str) -> tuple[SalaryStructure, dict]:
     data = chat_json(
         [
@@ -85,6 +96,7 @@ def _extract_ai(text: str) -> tuple[SalaryStructure, dict]:
     )
     meta = {
         "method": "ai",
+        "stated_gross_annual": _num(data.get("stated_gross_annual")),
         "candidate_name": data.get("candidate_name"),
         "joining_date": data.get("joining_date"),
         "components": data.get("components") or [],
@@ -140,15 +152,25 @@ def _amounts(line: str) -> list[float]:
 def _extract_heuristic(text: str) -> tuple[SalaryStructure, dict]:
     seen: set[tuple[str, float]] = set()
     components = []
-    stated_ctc = 0.0
+    stated_ctc = stated_gross = 0.0
     for raw in SEGMENT_RE.split(text):
         line = raw.strip()
         amounts = _amounts(line)
         if not line or not amounts:
             continue
         low = line.lower()
+        monthly = bool(MONTHLY_RE.search(low))
         if re.search(r"\bctc\b|cost to company", low):
-            stated_ctc = max(stated_ctc, max(amounts))
+            ctc = max(amounts) * (12 if monthly and len(amounts) == 1 else 1)
+            stated_ctc = max(stated_ctc, ctc)
+            # "CTC ₹15L which includes a bonus of ₹1.5L": the smaller figure is the variable part
+            if len(amounts) >= 2 and re.search(r"variable|performance|bonus|incentive", low):
+                bonus = min(amounts)
+                if ("variable_pay", bonus) not in seen:
+                    seen.add(("variable_pay", bonus))
+                    components.append({"label": "Variable / bonus (in CTC)", "annual_amount": bonus, "category": "variable_pay"})
+        elif re.search(r"\bgross\b|total fixed|fixed (salary|compensation|pay)", low):
+            stated_gross = max(stated_gross, max(amounts) * (12 if monthly and len(amounts) == 1 else 1))
         cat = next((c for pat, c in KEYWORDS if re.search(pat, low)), None)
         if not cat or cat == "ignore":
             continue
@@ -171,6 +193,7 @@ def _extract_heuristic(text: str) -> tuple[SalaryStructure, dict]:
     data = {"components": components, "stated_ctc_annual": stated_ctc, "company": company, "location": location}
     meta = {
         "method": "heuristic",
+        "stated_gross_annual": stated_gross,
         "components": components,
         "notes": ["Parsed without AI (no GROQ_API_KEY). Check the extracted components carefully."],
     }
@@ -180,7 +203,7 @@ def _extract_heuristic(text: str) -> tuple[SalaryStructure, dict]:
 def extract_structure(text: str) -> tuple[SalaryStructure, dict]:
     try:
         structure, meta = _extract_ai(text)
-        if structure.basic + structure.special_allowance + structure.ctc <= 0:
+        if structure.basic + structure.special_allowance + structure.ctc + meta["stated_gross_annual"] <= 0:
             raise AIUnavailable("AI found no salary components")
     except AIUnavailable as exc:
         log.info("Falling back to heuristic extraction: %s", exc)

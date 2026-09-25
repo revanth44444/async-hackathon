@@ -115,3 +115,47 @@ def test_one_time_items_have_no_monthly_figure_and_know_if_they_are_in_ctc():
     assert esop.monthly is None and esop.in_ctc is True
     assert any(b.label == "ESOPs / RSUs" for b in quantora.ctc_buckets)
     assert sum(b.amount for b in quantora.ctc_buckets) == pytest.approx(2_577_000, abs=5)
+
+
+# ---- incomplete letters must never compute on ₹0 ------------------------------------------------
+from app.engine.calculator import complete_structure  # noqa: E402
+
+
+def test_ctc_only_letter_is_split_and_reconciles():
+    s, est = complete_structure(SalaryStructure(ctc=650_000))
+    r = calculate(s)
+    assert [e["kind"] for e in est] == ["split"]
+    assert r.monthly_in_hand > 40_000 and not r.warnings
+    assert sum(b.amount for b in r.ctc_buckets) == pytest.approx(650_000, abs=5)
+
+
+def test_ctc_with_variable_only_keeps_variable_outside_fixed_split():
+    s, _ = complete_structure(SalaryStructure(ctc=1_500_000, variable_pay=150_000))
+    assert s.variable_pay == 150_000
+    assert calculate(s).fixed_cash + s.employer_pf + s.gratuity == pytest.approx(1_350_000, abs=5)
+
+
+def test_monthly_ctc_is_annualised():
+    s, est = complete_structure(SalaryStructure(ctc=60_000))
+    assert s.ctc == 720_000 and est[0]["kind"] == "monthly_ctc"
+
+
+def test_gross_only_letter_derives_ctc():
+    s, est = complete_structure(SalaryStructure(), stated_gross=540_000)
+    r = calculate(s)
+    assert est[0]["kind"] == "gross"
+    assert r.fixed_cash == pytest.approx(540_000, abs=2)
+    assert r.structure.ctc > 540_000  # employer PF and gratuity on top
+
+
+def test_partial_breakup_balances_into_special_allowance():
+    s, est = complete_structure(SalaryStructure(ctc=1_000_000, basic=400_000))
+    assert est[0]["kind"] == "balance" and est[0]["amount"] == 600_000
+    assert not calculate(s).warnings
+
+
+def test_complete_letters_are_left_alone():
+    full = SalaryStructure(ctc=1_800_000, basic=720_000, hra=360_000, special_allowance=421_056, employer_pf=86_400,
+                           gratuity=34_632, insurance=17_912, variable_pay=160_000)
+    s, est = complete_structure(full)
+    assert est == [] and s == full

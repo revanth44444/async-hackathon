@@ -94,7 +94,7 @@ export default function OfferPage() {
       <div className="wrap space-y-24 pt-16">
         <div className="space-y-6">
           <StatRow r={r} />
-          {offer.extraction_meta.estimated_split && <EstimateNotice />}
+          <EstimateNotice messages={(offer.extraction_meta.estimates ?? []).map((e) => e.message)} />
           <Warnings items={r.warnings} />
         </div>
 

@@ -111,3 +111,14 @@ def test_letter_with_only_a_ctc_gets_an_estimated_split():
         assert d["extraction_meta"]["estimated_split"] is True
         assert d["result"]["monthly_in_hand"] > 40_000
         assert d["result"]["warnings"] == []
+
+
+def test_gross_only_and_empty_letters():
+    with TestClient(app, headers=ME) as c:
+        r = c.post("/api/offers/text", json={"text": "Offer from Orbit Labs Pvt Ltd. Your gross salary will be Rs 45,000 per month. Location: Hyderabad."})
+        assert r.status_code == 201
+        d = r.json()
+        assert [e["kind"] for e in d["extraction_meta"]["estimates"]] == ["gross"]
+        assert d["result"]["monthly_in_hand"] > 40_000
+        r = c.post("/api/offers/text", json={"text": "Dear candidate, we are pleased to offer you a role. Compensation details will follow separately."})
+        assert r.status_code == 422 and "CTC" in r.json()["detail"]
